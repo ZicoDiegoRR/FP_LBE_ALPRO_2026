@@ -1,66 +1,42 @@
 package rc4_encrypt
 
 import (
-	"os"
-	"path/filepath"
+	"fmt"
 	"testing"
 )
 
-var benchmarkKey = []byte("benchmark-key-2026")
-
-func loadBenchmarkFile(b *testing.B, name string) []byte {
-	b.Helper()
-
-	path := filepath.Join("..", "testdata", name)
-	data, err := os.ReadFile(path)
-	if err != nil {
-		b.Fatalf("gagal membaca %s: %v", path, err)
-	}
-
-	if len(data) == 0 {
-		b.Fatalf("file %s kosong", path)
-	}
-
-	return data
-}
-
 func BenchmarkRC4(b *testing.B) {
-	files := []struct {
+	key := []byte("benchmark-key")
+
+	testCases := []struct {
 		name string
-		file string
+		size int
 	}{
-		{"Text", "sample.txt"},
-		{"Image", "sample.jpg"},
-		{"Video", "sample.mp4"},
+		{"Small_1KiB", 1 * 1024},
+		{"Medium_1MiB", 1 * 1024 * 1024},
+		{"Large_10MiB", 10 * 1024 * 1024},
 	}
 
-	for _, f := range files {
-		b.Run(f.name+"/Encrypt", func(b *testing.B) {
-			data := loadBenchmarkFile(b, f.file)
-			b.SetBytes(int64(len(data)))
-			b.ResetTimer()
-
-			for i := 0; i < b.N; i++ {
-				_, err := RC4Crypt(data, benchmarkKey)
-				if err != nil {
-					b.Fatal(err)
-				}
-			}
+	for _, tc := range testCases {
+		b.Run(tc.name+"/Encrypt", func(b *testing.B) {
+			benchmarkRC4Crypt(b, key, tc.size)
 		})
 
-		b.Run(f.name+"/Decrypt", func(b *testing.B) {
-			data := loadBenchmarkFile(b, f.file)
+		b.Run(tc.name+"/Decrypt", func(b *testing.B) {
+			plaintext := make([]byte, tc.size)
 
-			encrypted, err := RC4Crypt(data, benchmarkKey)
+			// Siapkan ciphertext sebelum timer dimulai.
+			ciphertext, err := RC4Crypt(plaintext, key)
 			if err != nil {
 				b.Fatal(err)
 			}
 
-			b.SetBytes(int64(len(data)))
+			b.SetBytes(int64(tc.size))
+			b.ReportAllocs()
 			b.ResetTimer()
 
 			for i := 0; i < b.N; i++ {
-				_, err := RC4Crypt(encrypted, benchmarkKey)
+				_, err := RC4Crypt(ciphertext, key)
 				if err != nil {
 					b.Fatal(err)
 				}
@@ -68,3 +44,25 @@ func BenchmarkRC4(b *testing.B) {
 		})
 	}
 }
+
+func benchmarkRC4Crypt(b *testing.B, key []byte, size int) {
+	plaintext := make([]byte, size)
+
+	// Hindari input yang seluruhnya nol.
+	for i := range plaintext {
+		plaintext[i] = byte(i % 251)
+	}
+
+	b.SetBytes(int64(size))
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		_, err := RC4Crypt(plaintext, key)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+var _ = fmt.Sprintf

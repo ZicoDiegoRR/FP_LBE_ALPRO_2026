@@ -7,28 +7,30 @@ import (
 )
 
 func TestRC4CryptRoundTrip(t *testing.T) {
-	// Data pengujian
 	key := []byte("testing-key")
 	plaintext := []byte("Hello World")
 
-	// Enkripsi plaintext
+	// Enkripsi
 	ciphertext, err := RC4Crypt(plaintext, key)
 	if err != nil {
 		t.Fatalf("Enkripsi gagal: %v", err)
 	}
 
-	// Dekripsi ciphertext menggunakan kunci yang sama
+	// Dekripsi menggunakan fungsi yang sama
 	decrypted, err := RC4Crypt(ciphertext, key)
 	if err != nil {
 		t.Fatalf("Dekripsi gagal: %v", err)
 	}
 
-	// Pastikan hasil dekripsi sama dengan plaintext
+	// Pastikan plaintext kembali utuh
 	if !bytes.Equal(plaintext, decrypted) {
-		t.Fatal("Hasil dekripsi tidak sama dengan plaintext")
+		t.Fatalf(
+			"Hasil dekripsi tidak sesuai: got %q, want %q",
+			decrypted,
+			plaintext,
+		)
 	}
 
-	// Tampilkan hasil pengujian di terminal
 	t.Logf("Plaintext  : %s", plaintext)
 	t.Logf("Ciphertext : %s", hex.EncodeToString(ciphertext))
 	t.Logf("Decrypted  : %s", decrypted)
