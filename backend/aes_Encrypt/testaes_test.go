@@ -31,3 +31,15 @@ func TestEncryptDecrypt(t *testing.T) {
     t.Logf("Encrypted (hex): %x", encrypted)
     t.Logf("Decrypted: %s", decrypted)
 }
+
+func TestRejectInvalidKey(t *testing.T) {
+    key := make([]byte, 31)
+
+    if _, err := Encrypt([]byte("Hello from AES"), key); err == nil {
+        t.Fatal("Encrypt menerima key 31 byte")
+    }
+
+    if _, err := Decrypt([]byte("data"), key); err == nil {
+        t.Fatal("Decrypt menerima key 31 byte")
+    }
+}

@@ -43,6 +43,9 @@ func Encrypt(plainText, key []byte) ([]byte, error) {
 // }
 
 func Decrypt(cipherText, key []byte) ([]byte, error) {
+	if len(key) !=32{
+		return nil, errors.New("Key must be 32 Byte!")
+	}	
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, err
