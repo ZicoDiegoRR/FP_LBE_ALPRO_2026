@@ -1,12 +1,12 @@
 // AES 256
-package main
+package aesmodule
 
 import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
 	"errors"
-	"fmt"
+	//"fmt"
 	"io"
 )
 
@@ -63,27 +63,3 @@ func Decrypt(cipherText, key []byte) ([]byte, error) {
 	return plainText, nil
 }
 
-func main() {
-	// 32-byte key for AES-256
-	//key := []byte("passphrasewhichneedstobe32bytes!")
-	key := make([]byte, 32)
-	_, err := rand.Read(key)
-	if err != nil {
-		panic(err)
-	}
-	message := []byte("Helwwo from the ous")
-
-	// Encrypt
-	encrypted, err := Encrypt(message, key)
-	if err != nil {
-		panic(err)
-	}
-	fmt.Printf("Encrypted (hex): %x\n", encrypted)
-
-	// Decrypt
-	decrypted, err := Decrypt(encrypted, key)
-	if err != nil {
-		panic(err)
-	}
-	fmt.Printf("Decrypted: %s\n", string(decrypted))
-}
