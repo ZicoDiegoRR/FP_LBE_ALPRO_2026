@@ -2,13 +2,13 @@ package main
 
 import (
 	"crypto/rand"
-	"encoding/json"
+	//"encoding/json"
 	"fmt"
-	"os"
+	//"os"
 	"time"
 
 	// Ini diganti dirnya
-	"backend/aes_Encrypt"
+	aesmodule "pmo-backend/aes_Encrypt"
 	//"backend/.."
 )
 
@@ -23,11 +23,12 @@ func main() {
 		"1 KB":  1024,
 		"64 KB": 64 * 1024,
 		"1 MB":  1024 * 1024,
+		//"100 MB": 1024 * 1024,
 	}
 
 	tasks := []BenchmarkTask{
 		//{Name: "DES-{block}", KeySize: 8, EncryptFunc: cryptoalgos.Encrypt},
-		{Name: "AES-256-GCM", KeySize: 32, EncryptFunc: aes_Encrypt.Encrypt},
+		{Name: "AES-256-GCM", KeySize: 32, EncryptFunc: aesmodule.Encrypt},
 		//{Name: "RC4", KeySize: 16, EncryptFunc: cryptoalgos.Encrypt},
 	}
 
