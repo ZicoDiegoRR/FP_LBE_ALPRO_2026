@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"pmo-backend/db"
+	"pmo-backend/encrypt"
 	"pmo-backend/models"
 	"pmo-backend/utils"
 )
@@ -23,21 +24,12 @@ type SubmitBorrowRequest struct {
 	EquipmentIDs []string `json:"equipmentIds" binding:"required,min=1"`
 }
 
-// datetime-local inputs send a plain wall-clock string with no timezone
-// info (e.g. "2026-09-20T14:00") — time.Parse would default that to UTC,
-// which is wrong if the person entering it is anywhere else. Assuming a
-// single-timezone deployment (WIB, UTC+7) here; adjust the offset if users
-// ever span multiple timezones.
 var scheduleLocation = time.FixedZone("WIB", 7*60*60)
 
 func parseScheduledAt(value string) (time.Time, error) {
 	return time.ParseInLocation("2006-01-02T15:04", value, scheduleLocation)
 }
 
-// asScheduleLocation re-stamps a time read back from the database into WIB.
-// lib/pq labels "timestamp without time zone" columns as UTC on scan
-// regardless of what zone was used to write them, so without this,
-// comparisons against time.Now() end up off by the WIB offset (7h).
 func asScheduleLocation(t time.Time) time.Time {
 	return time.Date(
 		t.Year(), t.Month(), t.Day(),
@@ -68,18 +60,37 @@ func SubmitBorrow(c *gin.Context) {
 		return
 	}
 
+	// Fetch key and algorithm directly from the encrypt package
+	key := encrypt.GetEncryptionKey()
+	algo := encrypt.GetAlgorithm()
+
+	// Encrypt the reason provided in the request
+	encryptedReason, err := encrypt.Middleware(req.Reason, key, algo)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, APIResponse{false, "Failed to encrypt reason"})
+		return
+	}
+
+	// Encrypt the initial status message
+	rawStatusMessage := "Request is pending for approval."
+	encryptedStatusMessage, err := encrypt.Middleware(rawStatusMessage, key, algo)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, APIResponse{false, "Failed to encrypt status message"})
+		return
+	}
+
 	now := time.Now()
 	borrow := models.Borrow{
 		ID:                      utils.GenerateID(),
 		ScheduledDatetime:       scheduled,
 		BookedDatetime:          now,
-		Reason:                  req.Reason,
+		Reason:                  encryptedReason,
 		BorrowDurationSeconds:   totalSeconds,
 		BorrowStatusID:          statusPending,
 		UserID:                  userID,
 		FinishedAt:              nil,
 		Title:                   req.Title,
-		StatusMessage:           "Request is pending for approval.",
+		StatusMessage:           encryptedStatusMessage,
 		StatusMessageUpdateTime: now,
 	}
 

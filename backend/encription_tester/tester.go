@@ -8,7 +8,7 @@ import (
 	"time"
 
 	// Ini diganti dirnya
-	aesmodule "pmo-backend/aes_Encrypt"
+	"pmo-backend/encrypt"
 	//"backend/.."
 )
 
@@ -28,7 +28,7 @@ func main() {
 
 	tasks := []BenchmarkTask{
 		//{Name: "DES-{block}", KeySize: 8, EncryptFunc: cryptoalgos.Encrypt},
-		{Name: "AES-256-GCM", KeySize: 32, EncryptFunc: aesmodule.Encrypt},
+		{Name: "AES-256-GCM", KeySize: 32, EncryptFunc: encrypt.EncryptAES},
 		//{Name: "RC4", KeySize: 16, EncryptFunc: cryptoalgos.Encrypt},
 	}
 

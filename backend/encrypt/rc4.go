@@ -1,4 +1,4 @@
-package rc4_encrypt
+package encrypt
 
 import (
 	"crypto/rc4"
@@ -6,9 +6,10 @@ import (
 	"os"
 )
 
-// RC4Crypt mengenkripsi atau mendekripsi data bytes menggunakan RC4.
+// EncryptRC4 mengenkripsi atau mendekripsi data bytes menggunakan RC4
+// (XOR stream cipher: the same function does both directions).
 // Fungsi ini ditujukan untuk demonstrasi dan pengujian akademik.
-func RC4Crypt(data []byte, key []byte) ([]byte, error) {
+func EncryptRC4(data []byte, key []byte) ([]byte, error) {
 	cipher, err := rc4.NewCipher(key)
 	if err != nil {
 		return nil, fmt.Errorf("gagal membuat RC4 cipher: %w", err)
@@ -20,14 +21,21 @@ func RC4Crypt(data []byte, key []byte) ([]byte, error) {
 	return result, nil
 }
 
-// RC4EncryptFile membaca file, mengenkripsi isinya, lalu menyimpan hasilnya.
-func RC4EncryptFile(inputPath, outputPath string, key []byte) error {
+// DecryptRC4 is identical to EncryptRC4 — RC4 is a symmetric XOR stream
+// cipher, so encryption and decryption are the same operation. Kept as a
+// separate name for readability at call sites.
+func DecryptRC4(data []byte, key []byte) ([]byte, error) {
+	return EncryptRC4(data, key)
+}
+
+// EncryptFileRC4 membaca file, mengenkripsi isinya, lalu menyimpan hasilnya.
+func EncryptFileRC4(inputPath, outputPath string, key []byte) error {
 	data, err := os.ReadFile(inputPath)
 	if err != nil {
 		return fmt.Errorf("gagal membaca file: %w", err)
 	}
 
-	encrypted, err := RC4Crypt(data, key)
+	encrypted, err := EncryptRC4(data, key)
 	if err != nil {
 		return err
 	}
@@ -39,14 +47,14 @@ func RC4EncryptFile(inputPath, outputPath string, key []byte) error {
 	return nil
 }
 
-// RC4DecryptFile membaca file terenkripsi dan menyimpan hasil dekripsinya.
-func RC4DecryptFile(inputPath, outputPath string, key []byte) error {
+// DecryptFileRC4 membaca file terenkripsi dan menyimpan hasil dekripsinya.
+func DecryptFileRC4(inputPath, outputPath string, key []byte) error {
 	data, err := os.ReadFile(inputPath)
 	if err != nil {
 		return fmt.Errorf("gagal membaca file terenkripsi: %w", err)
 	}
 
-	decrypted, err := RC4Crypt(data, key)
+	decrypted, err := DecryptRC4(data, key)
 	if err != nil {
 		return err
 	}

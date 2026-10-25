@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"pmo-backend/db"
+	"pmo-backend/encrypt"
 	"pmo-backend/models"
 )
 
@@ -69,6 +70,20 @@ func GetBorrowDetail(c *gin.Context) {
 
 	lab := labForBorrow(b.ID)
 
+	key := encrypt.GetEncryptionKey()
+	algo := encrypt.GetAlgorithm()
+
+	// Decrypt Reason and StatusMessage for response
+	decryptedReason, err := encrypt.DecryptMiddleware(b.Reason, key, algo)
+	if err != nil {
+		decryptedReason = b.Reason // Fallback if unencrypted or error
+	}
+
+	decryptedStatusMessage, err := encrypt.DecryptMiddleware(b.StatusMessage, key, algo)
+	if err != nil {
+		decryptedStatusMessage = b.StatusMessage // Fallback if unencrypted or error
+	}
+
 	var finishedAt interface{}
 	if b.FinishedAt != nil {
 		finishedAt = b.FinishedAt.Format("Jan 2, 2006 15:04")
@@ -76,8 +91,7 @@ func GetBorrowDetail(c *gin.Context) {
 		finishedAt = nil
 	}
 
-	// Equipment actually tied to THIS borrow (via EquipmentBorrowItem),
-	// not the lab's whole inventory.
+	// Equipment actually tied to THIS borrow (via EquipmentBorrowItem)
 	var links []models.EquipmentBorrowItem
 	db.DB.Where("borrow_id = ?", b.ID).Find(&links)
 
@@ -123,8 +137,8 @@ func GetBorrowDetail(c *gin.Context) {
 			"finishedAt":              finishedAt,
 			"labName":                 lab.Name,
 			"labPictureUrl":           lab.PictureURL,
-			"reason":                  b.Reason,
-			"statusMessage":           b.StatusMessage,
+			"reason":                  decryptedReason,
+			"statusMessage":           decryptedStatusMessage,
 			"statusType":              statusTypeForID(b.BorrowStatusID),
 		},
 		"equipment": items,
@@ -144,8 +158,18 @@ func CancelBorrow(c *gin.Context) {
 		return
 	}
 
+	key := encrypt.GetEncryptionKey()
+	algo := encrypt.GetAlgorithm()
+
+	// Encrypt the cancellation status message before saving
+	encryptedCancelMessage, err := encrypt.Middleware("Cancelled by user.", key, algo)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, APIResponse{false, "Failed to encrypt cancellation status"})
+		return
+	}
+
 	b.BorrowStatusID = statusCancelled
-	b.StatusMessage = "Cancelled by user."
+	b.StatusMessage = encryptedCancelMessage
 	b.StatusMessageUpdateTime = time.Now()
 
 	if err := db.DB.Save(&b).Error; err != nil {

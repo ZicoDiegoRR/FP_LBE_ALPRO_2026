@@ -1,13 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { API_BASE_URL } from "@/lib/api";
 import { ICONS } from "@/lib/icons";
 
-// Rectangular card background — a separate fixed image, distinct from the
-// user's actual profile picture (user.pfpUrl).
 const PROFILE_BANNER_BACKGROUND = "/img/profile_banner.png";
 
 type BorrowRequest = {
@@ -34,6 +32,8 @@ type ProfileData = {
 export default function ProfilePage() {
   const router = useRouter();
   const [data, setData] = useState<ProfileData | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     async function load() {
@@ -51,6 +51,44 @@ export default function ProfilePage() {
     load();
   }, []);
 
+  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+      const file = e.target.files?.[0];
+      if (!file) return;
+  
+      const formData = new FormData();
+      formData.append("pfp", file);
+  
+      setUploading(true);
+      try {
+        const res = await fetch(`${API_BASE_URL}/profile/pfp`, {
+          method: "POST",
+          credentials: "include",
+          body: formData,
+        });
+        const json = await res.json();
+        
+        if (json.success && data) {
+          // Append a timestamp (?t=...) to bypass browser image caching of the same URL
+          const timestampedUrl = `${json.pfpUrl}?t=${Date.now()}`;
+  
+          setData({
+            ...data,
+            user: {
+              ...data.user,
+              pfpUrl: timestampedUrl,
+            },
+          });
+        } else {
+          alert(json.message || "Failed to upload profile picture");
+        }
+      } catch (err) {
+        console.error("Upload error:", err);
+        alert("An error occurred while uploading.");
+      } finally {
+        setUploading(false);
+      }
+    }
+
   function handleRequestClick(id: string) {
     router.push(`/profile/${id}`);
   }
@@ -63,6 +101,15 @@ export default function ProfilePage() {
 
   return (
     <div className="space-y-6">
+      {/* Hidden file input for uploading profile picture */}
+      <input
+        type="file"
+        ref={fileInputRef}
+        onChange={handleFileChange}
+        accept="image/*"
+        className="hidden"
+      />
+
       {/* Profile banner */}
       <div
         className="relative rounded-2xl overflow-hidden bg-slate-200 bg-cover bg-center p-8 flex items-center gap-6"
@@ -73,14 +120,16 @@ export default function ProfilePage() {
           <img
             src={user.pfpUrl}
             alt={user.name}
-            className="w-28 h-28 rounded-full object-cover bg-white"
+            className="w-28 h-28 rounded-full object-cover bg-white shadow-md"
           />
           <button
-            className="absolute bottom-0 right-0 w-8 h-8 rounded-full bg-slate-900 flex items-center justify-center text-white text-sm"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading}
+            className="absolute bottom-0 right-0 w-8 h-8 rounded-full bg-slate-900 flex items-center justify-center text-white text-sm hover:bg-slate-700 transition disabled:opacity-50"
             aria-label="Edit profile picture"
-            title="Editing not available yet"
+            title="Upload new profile picture"
           >
-            ✎
+            {uploading ? "..." : "✎"}
           </button>
         </div>
 
@@ -96,7 +145,7 @@ export default function ProfilePage() {
         </div>
       </div>
 
-      {/* Borrow requests */}
+      {/* Borrow requests section remains unchanged */}
       <div className="bg-white rounded-2xl p-6">
         <div className="flex items-baseline justify-between mb-4">
           <h2 className="text-2xl font-bold">Your Borrow Requests</h2>

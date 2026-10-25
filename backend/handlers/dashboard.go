@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"pmo-backend/db"
+	"pmo-backend/encrypt"
 	"pmo-backend/models"
 )
 
@@ -74,18 +75,32 @@ type ActivityItem struct {
 func buildActivityItem(b models.Borrow) ActivityItem {
 	lab := labNameForBorrow(b.ID)
 
+	key := encrypt.GetEncryptionKey()
+	algo := encrypt.GetAlgorithm()
+
+	// Decrypt Reason and StatusMessage for display
+	decReason, err := encrypt.DecryptMiddleware(b.Reason, key, algo)
+	if err != nil {
+		decReason = b.Reason
+	}
+
+	decStatusMsg, err := encrypt.DecryptMiddleware(b.StatusMessage, key, algo)
+	if err != nil {
+		decStatusMsg = b.StatusMessage
+	}
+
 	switch b.BorrowStatusID {
 	case statusCancelled:
 		return ActivityItem{
 			StatusType: "cancelled",
 			Line1:      fmt.Sprintf("Cancelled borrow request to %s scheduled at %s.", lab, b.ScheduledDatetime.Format("Jan 2, 2006 15:04")),
-			Line2:      "Reason: " + truncate(b.StatusMessage, activityTextLimit),
+			Line2:      "Reason: " + truncate(decStatusMsg, activityTextLimit),
 		}
 	case statusPending:
 		return ActivityItem{
 			StatusType: "pending",
 			Line1:      fmt.Sprintf("Borrow request form submitted to %s. Wait for approval.", lab),
-			Line2:      "Reason: " + truncate(b.Reason, activityTextLimit),
+			Line2:      "Reason: " + truncate(decReason, activityTextLimit),
 		}
 	case statusAccepted:
 		return ActivityItem{
@@ -97,7 +112,7 @@ func buildActivityItem(b models.Borrow) ActivityItem {
 		return ActivityItem{
 			StatusType: "rejected",
 			Line1:      fmt.Sprintf("Submission to %s was rejected.", lab),
-			Line2:      "Reason: " + truncate(b.StatusMessage, activityTextLimit),
+			Line2:      "Reason: " + truncate(decStatusMsg, activityTextLimit),
 		}
 	case statusOngoing:
 		return ActivityItem{
@@ -114,12 +129,12 @@ func buildActivityItem(b models.Borrow) ActivityItem {
 		return ActivityItem{
 			StatusType: "failed",
 			Line1:      fmt.Sprintf("Borrow request to %s failed.", lab),
-			Line2:      "Reason: " + truncate(b.StatusMessage, activityTextLimit),
+			Line2:      "Reason: " + truncate(decStatusMsg, activityTextLimit),
 		}
 	default:
 		return ActivityItem{
 			StatusType: "none",
-			Line1:      truncate(b.StatusMessage, activityTextLimit),
+			Line1:      truncate(decStatusMsg, activityTextLimit),
 		}
 	}
 }

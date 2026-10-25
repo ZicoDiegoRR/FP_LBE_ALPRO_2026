@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"log"
 	"net/http"
 	"os"
@@ -16,25 +17,44 @@ import (
 	"pmo-backend/db"
 	"pmo-backend/handlers"
 	"pmo-backend/middleware"
+	"pmo-backend/utils"
 )
 
 func main() {
-	// Loads variables from .env into the environment. If the file doesn't
-	// exist (e.g. in production where real env vars are set another way),
-	// this just logs a notice and continues without failing.
+	// 1. Define command-line flags (NOTICE: no leading '--' in flag names)
+	safeTimestamp := time.Now().Format("2006-01-02_15-04-05.000") // Safe for file systems
+	algoType := flag.String("encrypt-algo", "aes", "Encryption algorithm type (aes, des, rc4).")
+	logPath := flag.String("log-path", "log-"+safeTimestamp+".txt", "Log file path.")
+	keyEncrypt := flag.String("encrypt-key", "", "Encryption key.")
+	
+	// Parse the flags
+	flag.Parse()
+
+	// 2. Loads variables from .env into the environment.
 	if err := godotenv.Load(); err != nil {
 		log.Println("No .env file found, relying on real environment variables")
 	}
 
+	// 3. Pass flag values to your modules / environment
+	// If the user provided a custom log path, update the encrypt package log file
+	if *logPath != "" {
+		_ = os.Setenv("LOG_FILE_PATH", *algoType)
+	}
+
+	// If a CLI encryption key was provided, override or set it in the environment
+	// so handlers/services can read it via getEnv()
+	if *keyEncrypt != "" {
+		_ = os.Setenv("ENCRYPTION_SECRET_KEY", *keyEncrypt)
+	}
+	if *algoType != "" {
+		_ = os.Setenv("ENCRYPTION_ALGO", *algoType)
+	}
+
 	db.Connect()
 
-	// Periodically upgrades Accepted->Ongoing and Pending->Failed in the
-	// background, independent of anyone actually loading a page. Interval
-	// is overridable via STATUS_SYNC_INTERVAL_SECONDS; 30s by default —
-	// borrow schedules only have minute precision, so this comfortably
-	// keeps up without hammering the database.
+	// Periodically upgrades Accepted->Ongoing and Pending->Failed in the background
 	syncIntervalSeconds := 30
-	if v := getEnv("STATUS_SYNC_INTERVAL_SECONDS", ""); v != "" {
+	if v := utils.GetEnv("STATUS_SYNC_INTERVAL_SECONDS", ""); v != "" {
 		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
 			syncIntervalSeconds = parsed
 		}
@@ -43,9 +63,7 @@ func main() {
 
 	r := gin.Default()
 
-	// Frontend (Next.js dev server) runs on a different port, so CORS must
-	// explicitly allow it AND allow credentials for the session cookie to work.
-	frontendOrigin := getEnv("FRONTEND_ORIGIN", "http://localhost:3000")
+	frontendOrigin := utils.GetEnv("FRONTEND_ORIGIN", "http://localhost:3000")
 	r.Use(cors.New(cors.Config{
 		AllowOrigins:     []string{frontendOrigin},
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
@@ -53,9 +71,7 @@ func main() {
 		AllowCredentials: true,
 	}))
 
-	// Cookie-based session store. SESSION_SECRET should be a long random
-	// string in production; this fallback is fine for local dev only.
-	secret := getEnv("SESSION_SECRET", "dev-only-secret-change-me")
+	secret := utils.GetEnv("SESSION_SECRET", "dev-only-secret-change-me")
 	store := cookie.NewStore([]byte(secret))
 	store.Options(sessions.Options{
 		Path:     "/",
@@ -76,15 +92,12 @@ func main() {
 	r.GET("/profile", middleware.RequireAuth(), handlers.GetProfile)
 	r.GET("/borrow/:id", middleware.RequireAuth(), handlers.GetBorrowDetail)
 	r.POST("/borrow/:id/cancel", middleware.RequireAuth(), handlers.CancelBorrow)
+	r.Static("/uploads", "./uploads") // Serves uploaded files publicly
+	r.POST("/profile/pfp", middleware.RequireAuth(), handlers.UploadProfilePicture)
+	r.GET("/pfp/serve/:userId", handlers.ServeProfilePicture)
 
-	port := getEnv("GO_PORT", "8080")
+	port := utils.GetEnv("GO_PORT", "8080")
 	log.Println("Go backend running on http://localhost:" + port)
+	go handlers.StartTempCleanupScheduler(5 * time.Minute)
 	r.Run(":" + port)
-}
-
-func getEnv(key, fallback string) string {
-	if val := os.Getenv(key); val != "" {
-		return val
-	}
-	return fallback
 }
