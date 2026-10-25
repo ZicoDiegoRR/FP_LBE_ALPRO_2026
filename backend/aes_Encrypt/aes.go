@@ -11,6 +11,9 @@ import (
 )
 
 func Encrypt(plainText, key []byte) ([]byte, error) {
+	if len(key) !=32{
+		return nil, errors.New("Key must be 32 Byte!")
+	}
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, err
@@ -38,6 +41,7 @@ func Encrypt(plainText, key []byte) ([]byte, error) {
 // 	}
 // 	return key, nil
 // }
+
 func Decrypt(cipherText, key []byte) ([]byte, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
