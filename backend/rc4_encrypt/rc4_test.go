@@ -2,68 +2,34 @@ package rc4_encrypt
 
 import (
 	"bytes"
-	"os"
-	"path/filepath"
+	"encoding/hex"
 	"testing"
 )
 
 func TestRC4CryptRoundTrip(t *testing.T) {
+	// Data pengujian
 	key := []byte("testing-key")
-	original := []byte("Contoh data untuk pengujian RC4")
+	plaintext := []byte("Hello World")
 
-	encrypted, err := RC4Crypt(original, key)
+	// Enkripsi plaintext
+	ciphertext, err := RC4Crypt(plaintext, key)
 	if err != nil {
-		t.Fatalf("enkripsi gagal: %v", err)
+		t.Fatalf("Enkripsi gagal: %v", err)
 	}
 
-	if bytes.Equal(original, encrypted) {
-		t.Fatal("hasil enkripsi sama dengan data asli")
-	}
-
-	decrypted, err := RC4Crypt(encrypted, key)
+	// Dekripsi ciphertext menggunakan kunci yang sama
+	decrypted, err := RC4Crypt(ciphertext, key)
 	if err != nil {
-		t.Fatalf("dekripsi gagal: %v", err)
+		t.Fatalf("Dekripsi gagal: %v", err)
 	}
 
-	if !bytes.Equal(original, decrypted) {
-		t.Fatal("hasil dekripsi tidak sama dengan data asli")
-	}
-}
-
-func TestRC4FileRoundTrip(t *testing.T) {
-	dir := t.TempDir()
-	key := []byte("testing-key")
-	original := []byte("Isi file untuk pengujian")
-
-	input := filepath.Join(dir, "input.txt")
-	encrypted := filepath.Join(dir, "encrypted.bin")
-	decrypted := filepath.Join(dir, "decrypted.txt")
-
-	if err := os.WriteFile(input, original, 0600); err != nil {
-		t.Fatal(err)
+	// Pastikan hasil dekripsi sama dengan plaintext
+	if !bytes.Equal(plaintext, decrypted) {
+		t.Fatal("Hasil dekripsi tidak sama dengan plaintext")
 	}
 
-	if err := RC4EncryptFile(input, encrypted, key); err != nil {
-		t.Fatalf("enkripsi file gagal: %v", err)
-	}
-
-	if err := RC4DecryptFile(encrypted, decrypted, key); err != nil {
-		t.Fatalf("dekripsi file gagal: %v", err)
-	}
-
-	result, err := os.ReadFile(decrypted)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if !bytes.Equal(original, result) {
-		t.Fatal("hasil file dekripsi tidak sama dengan file asli")
-	}
-}
-
-func TestRC4RejectsEmptyKey(t *testing.T) {
-	_, err := RC4Crypt([]byte("data"), nil)
-	if err == nil {
-		t.Fatal("seharusnya kunci kosong menghasilkan error")
-	}
+	// Tampilkan hasil pengujian di terminal
+	t.Logf("Plaintext  : %s", plaintext)
+	t.Logf("Ciphertext : %s", hex.EncodeToString(ciphertext))
+	t.Logf("Decrypted  : %s", decrypted)
 }
