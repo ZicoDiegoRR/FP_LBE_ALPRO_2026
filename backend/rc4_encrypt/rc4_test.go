@@ -1,4 +1,4 @@
-package utils
+package rc4_encrypt
 
 import (
 	"bytes"
