@@ -15,6 +15,10 @@ type User struct {
 	RoleID       string    `gorm:"column:role_id;size:20"`
 }
 
+// func (User) TableName() string {
+// 	return `"User"` // keep quoted: capitalized + reserved word in Postgres
+// }
+
 func (User) TableName() string {
-	return `"User"` // keep quoted: capitalized + reserved word in Postgres
+	return "users"
 }

@@ -16,7 +16,7 @@ import (
 )
 
 // Every new sign-up gets this default profile picture unless they upload their own later.
-const defaultPfpURL = "https://upload.wikimedia.org/wikipedia/commons/a/ac/Default_pfp.jpg?utm_source=commons.wikimedia.org&utm_campaign=index&utm_content=original"
+const defaultPfpURL = "../frontend/public/img/default_pfp.jpg"
 
 // Every new sign-up gets this role unless DEFAULT_ROLE_ID overrides it.
 const fallbackDefaultRoleID = "F4L9SOWPVI7465NEOBM7"
@@ -163,13 +163,15 @@ func Signup(c *gin.Context) {
 		return
 	}
 
+	encryptedDefaultProfilePicture, err := encrypt.EncryptString(defaultPfpURL, key, algo)
+
 	user := models.User{
 		ID:           utils.GenerateID(),
 		Name:         encryptedUsername,
 		CreationDate: time.Now(),
 		Email:        encryptedEmail,
 		Password:     string(hashedPassword),
-		PfpURL:       defaultPfpURL,
+		PfpURL:       encryptedDefaultProfilePicture,
 		RoleID:       defaultRoleID(),
 	}
 

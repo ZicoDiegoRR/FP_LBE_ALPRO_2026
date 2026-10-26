@@ -4,3 +4,7 @@ frontend/.next
 backend/uploads
 backend/temp
 log-*.txt
+backend/cookies.txt
+backend/pmo.db*
+backend/hasil_download.*
+backend/vault/

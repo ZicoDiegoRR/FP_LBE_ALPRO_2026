@@ -36,13 +36,10 @@ func main() {
 	}
 
 	// 3. Pass flag values to your modules / environment
-	// If the user provided a custom log path, update the encrypt package log file
 	if *logPath != "" {
 		_ = os.Setenv("LOG_FILE_PATH", *algoType)
 	}
 
-	// If a CLI encryption key was provided, override or set it in the environment
-	// so handlers/services can read it via getEnv()
 	if *keyEncrypt != "" {
 		_ = os.Setenv("ENCRYPTION_SECRET_KEY", *keyEncrypt)
 	}
@@ -95,6 +92,12 @@ func main() {
 	r.Static("/uploads", "./uploads") // Serves uploaded files publicly
 	r.POST("/profile/pfp", middleware.RequireAuth(), handlers.UploadProfilePicture)
 	r.GET("/pfp/serve/:userId", handlers.ServeProfilePicture)
+
+	// === TAMBAHAN RUTE FILE ENKRIPSI (LANGKAH 4) ===
+	r.POST("/files", middleware.RequireAuth(), handlers.UploadFile)
+	r.GET("/files", middleware.RequireAuth(), handlers.ListFiles)
+	r.GET("/files/:id", middleware.RequireAuth(), handlers.DownloadFile)
+	// ===============================================
 
 	port := utils.GetEnv("GO_PORT", "8080")
 	log.Println("Go backend running on http://localhost:" + port)

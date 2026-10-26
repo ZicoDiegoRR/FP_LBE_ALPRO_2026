@@ -1,36 +1,47 @@
 package db
 
 import (
-	"fmt"
 	"log"
 	"os"
 
-	"gorm.io/driver/postgres"
+	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
+
+	"pmo-backend/models"
 )
 
 var DB *gorm.DB
 
 func Connect() {
-	host := getEnv("DB_HOST", "localhost")
-	port := getEnv("DB_PORT", "5432")
-	user := getEnv("DB_USER", "postgres")
-	password := getEnv("DB_PASSWORD", "postgres")
-	dbname := getEnv("DB_NAME", "pmo")
-	sslmode := getEnv("DB_SSLMODE", "require") // most cloud Postgres providers require this
+	path := getEnv("DB_PATH", "pmo.db")
+	// busy_timeout + WAL mengurangi error "database is locked"
+	// karena ada scheduler yang menulis di latar belakang.
+	dsn := path + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)"
 
-	dsn := fmt.Sprintf(
-		"host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
-		host, port, user, password, dbname, sslmode,
-	)
-
-	database, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+	database, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	if err != nil {
-		log.Fatalf("failed to connect to database: %v", err)
+		log.Fatalf("failed to open SQLite database: %v", err)
 	}
 
+	if err := database.AutoMigrate(
+		&models.Role{},
+		&models.User{},
+		&models.BorrowStatus{},
+		&models.Lab{},
+		&models.Equipment{},
+		&models.EquipmentStatus{},
+		&models.LabEquipment{},
+		&models.Borrow{},
+		&models.EquipmentBorrowItem{},
+		&models.StoredFile{}, // <-- Ditambahkan di sini secara bersih
+	); err != nil {
+		log.Fatalf("failed to migrate database: %v", err)
+	}
+
+	seed(database)
+
 	DB = database
-	log.Println("Connected to PostgreSQL:", dbname)
+	log.Println("Connected to SQLite:", path)
 }
 
 func getEnv(key, fallback string) string {
