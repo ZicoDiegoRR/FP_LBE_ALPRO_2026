@@ -75,10 +75,11 @@ func GetProfile(c *gin.Context) {
 
 	// In GetProfile:
 	var decryptedPfpURL string
-	if user.PfpURL != "" {
-    	decryptedPfpURL = "http://localhost:8080/pfp/serve/" + user.ID
+		// Check if the user has an uploaded custom picture (not empty and not the default string)		
+	if user.PfpURL != "" && user.PfpURL != defaultPfpURL {
+		decryptedPfpURL = "http://localhost:8080/pfp/serve/" + user.ID
 	} else {
-    	decryptedPfpURL = defaultPfpURL
+		decryptedPfpURL = defaultPfpURL
 	}
 
 	var borrows []models.Borrow
@@ -192,18 +193,20 @@ func ServeProfilePicture(c *gin.Context) {
 		return
 	}
 
-	if user.PfpURL == "" || user.PfpURL == defaultPfpURL {
-		c.JSON(http.StatusNotFound, gin.H{"error": "No profile picture set"})
+	// If PfpURL is empty, serve the default asset immediately
+	if user.PfpURL == "" {
+		c.File(defaultPfpURL)
 		return
 	}
 
 	key := encrypt.GetEncryptionKey()
 	algo := encrypt.GetAlgorithm()
 
-	// 1. Decrypt the database path string to get the encrypted file path on disk
-	encryptedFilePath, err := encrypt.DecryptMiddleware(user.PfpURL, key, algo)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decrypt profile picture path"})
+	// 1. Decrypt the database path string first
+	decryptedPathStr, err := encrypt.DecryptMiddleware(user.PfpURL, key, algo)
+	if err != nil || decryptedPathStr == defaultPfpURL {
+		// If decryption fails or decrypted path matches the default, serve default
+		c.File(defaultPfpURL)
 		return
 	}
 
@@ -214,18 +217,18 @@ func ServeProfilePicture(c *gin.Context) {
 		return
 	}
 
-	// 3. Define a unique target path inside ./temp using fmt.Sprintf to safely convert time to string
+	// 3. Define a unique target path inside ./temp
 	tempTargetPath := fmt.Sprintf("%s/%s_%d.jpg", tempDir, requestedUserID, time.Now().UnixNano())
 
-	// 4. Run DecryptMiddleware on the encrypted file path
-	decryptedPath, err := encrypt.DecryptMiddleware(encryptedFilePath, key, algo)
+	// 4. Decrypt the actual file from disk using the decrypted file path
+	decryptedFilePath, err := encrypt.DecryptMiddleware(decryptedPathStr, key, algo)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decrypt image file"})
 		return
 	}
 
 	// Read decrypted file bytes and copy into the ./temp folder so the cleanup scheduler tracks it
-	inputData, err := os.ReadFile(decryptedPath)
+	inputData, err := os.ReadFile(decryptedFilePath)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read decrypted file"})
 		return
@@ -237,8 +240,8 @@ func ServeProfilePicture(c *gin.Context) {
 	}
 
 	// Clean up intermediate decryption artifact if your middleware left one behind
-	if decryptedPath != tempTargetPath {
-		_ = os.Remove(decryptedPath)
+	if decryptedFilePath != tempTargetPath {
+		_ = os.Remove(decryptedFilePath)
 	}
 
 	// Serve the file from ./temp so the background scheduler can purge it later
