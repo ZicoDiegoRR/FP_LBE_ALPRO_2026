@@ -9,14 +9,15 @@ import (
 
 // Config menyimpan seluruh konfigurasi aplikasi
 type Config struct {
-	Port    string
-	GinMode string
-	AppName string
+	Port     string
+	GinMode  string
+	AppName  string
+	DBDriver string
+	DBName   string
 }
 
 // LoadConfig membaca environment variable dari file .env atau sistem OS
 func LoadConfig() *Config {
-	// Muat file .env jika ada (tidak fatal jika gagal di environment production)
 	err := godotenv.Load()
 	if err != nil {
 		log.Println("[INFO] File .env tidak ditemukan, menggunakan environment OS bawaan")
@@ -24,7 +25,7 @@ func LoadConfig() *Config {
 
 	port := os.Getenv("PORT")
 	if port == "" {
-		port = "8080" // Nilai default jika tidak disetel
+		port = "8080"
 	}
 
 	ginMode := os.Getenv("GIN_MODE")
@@ -37,9 +38,21 @@ func LoadConfig() *Config {
 		appName = "PMO-Backend"
 	}
 
+	dbDriver := os.Getenv("DB_DRIVER")
+	if dbDriver == "" {
+		dbDriver = "sqlite"
+	}
+
+	dbName := os.Getenv("DB_NAME")
+	if dbName == "" {
+		dbName = "pmo.db"
+	}
+
 	return &Config{
-		Port:    port,
-		GinMode: ginMode,
-		AppName: appName,
+		Port:     port,
+		GinMode:  ginMode,
+		AppName:  appName,
+		DBDriver: dbDriver,
+		DBName:   dbName,
 	}
 }
