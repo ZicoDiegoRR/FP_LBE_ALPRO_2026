@@ -9,11 +9,16 @@ import (
 
 // Config menyimpan seluruh konfigurasi aplikasi
 type Config struct {
-	Port     string
-	GinMode  string
-	AppName  string
-	DBDriver string
-	DBName   string
+	Port         string
+	GinMode      string
+	AppName      string
+	DBDriver     string
+	DBName       string
+	JWTSecret    string
+	CryptoKeyAES string
+	CryptoKeyDES string
+	CryptoKeyRC4 string
+	StoragePath  string
 }
 
 // LoadConfig membaca environment variable dari file .env atau sistem OS
@@ -23,36 +28,25 @@ func LoadConfig() *Config {
 		log.Println("[INFO] File .env tidak ditemukan, menggunakan environment OS bawaan")
 	}
 
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
-	}
-
-	ginMode := os.Getenv("GIN_MODE")
-	if ginMode == "" {
-		ginMode = "debug"
-	}
-
-	appName := os.Getenv("APP_NAME")
-	if appName == "" {
-		appName = "PMO-Backend"
-	}
-
-	dbDriver := os.Getenv("DB_DRIVER")
-	if dbDriver == "" {
-		dbDriver = "sqlite"
-	}
-
-	dbName := os.Getenv("DB_NAME")
-	if dbName == "" {
-		dbName = "pmo.db"
-	}
-
 	return &Config{
-		Port:     port,
-		GinMode:  ginMode,
-		AppName:  appName,
-		DBDriver: dbDriver,
-		DBName:   dbName,
+		Port:         getEnv("PORT", "8080"),
+		GinMode:      getEnv("GIN_MODE", "debug"),
+		AppName:      getEnv("APP_NAME", "PMO-Backend"),
+		DBDriver:     getEnv("DB_DRIVER", "sqlite"),
+		DBName:       getEnv("DB_NAME", "pmo.db"),
+		JWTSecret:    getEnv("JWT_SECRET", "default_insecure_jwt_secret_change_me"),
+		CryptoKeyAES: getEnv("CRYPTO_KEY_AES", "12345678901234567890123456789012"), // 32 byte
+		CryptoKeyDES: getEnv("CRYPTO_KEY_DES", "12345678"),                         // 8 byte
+		CryptoKeyRC4: getEnv("CRYPTO_KEY_RC4", "1234567890123456"),                 // 16 byte
+		StoragePath:  getEnv("STORAGE_PATH", "./storage/encrypted"),
 	}
+}
+
+// Helper untuk membaca env dengan nilai default jika kosong
+func getEnv(key, fallback string) string {
+	val := os.Getenv(key)
+	if val == "" {
+		return fallback
+	}
+	return val
 }
