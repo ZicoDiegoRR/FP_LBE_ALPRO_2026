@@ -339,3 +339,26 @@ func (h *VaultHandler) GetMyVaultFiles(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"files": files})
 }
+
+// RevokeShareAccess (Pemilik) mencabut hak akses berkas yang sebelumnya diberikan
+func (h *VaultHandler) RevokeShareAccess(c *gin.Context) {
+	ownerID := c.MustGet("user_id").(uint)
+	reqIDStr := c.Param("id")
+	reqID, _ := strconv.ParseUint(reqIDStr, 10, 32)
+
+	req, err := h.vaultRepo.GetShareRequestByID(uint(reqID))
+	if err != nil || req == nil || req.OwnerID != ownerID {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Data izin berbagi tidak ditemukan"})
+		return
+	}
+
+	if err := h.vaultRepo.RevokeShareRequest(req.ID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mencabut izin akses"})
+		return
+	}
+
+	// Catat di Activity Log
+	h.vaultRepo.LogActivity(ownerID, "REVOKE", fmt.Sprintf("Mencabut akses berkas ID %d untuk user ID %d", req.FileID, req.RequesterID))
+
+	c.JSON(http.StatusOK, gin.H{"message": "Hak akses berkas berhasil dicabut!"})
+}

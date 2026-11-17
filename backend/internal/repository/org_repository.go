@@ -15,14 +15,12 @@ func NewOrgRepository(db *gorm.DB) *OrgRepository {
 	return &OrgRepository{db: db}
 }
 
-// --- ORGANISASI (ADMIN) ---
+// --- 1. ORGANISASI & KEBIJAKAN FORM KUSTOM ---
 
-// CreateOrganization membuat organisasi baru beserta redeem code unik
 func (r *OrgRepository) CreateOrganization(org *model.Organization) error {
 	return r.db.Create(org).Error
 }
 
-// GetOrgByOwnerID mengambil organisasi milik Admin tertentu
 func (r *OrgRepository) GetOrgByOwnerID(ownerID uint) (*model.Organization, error) {
 	var org model.Organization
 	err := r.db.Where("owner_id = ?", ownerID).First(&org).Error
@@ -35,7 +33,6 @@ func (r *OrgRepository) GetOrgByOwnerID(ownerID uint) (*model.Organization, erro
 	return &org, nil
 }
 
-// GetOrgByRedeemCode mencari organisasi berdasarkan Redeem Code
 func (r *OrgRepository) GetOrgByRedeemCode(code string) (*model.Organization, error) {
 	var org model.Organization
 	err := r.db.Where("redeem_code = ?", code).First(&org).Error
@@ -48,14 +45,30 @@ func (r *OrgRepository) GetOrgByRedeemCode(code string) (*model.Organization, er
 	return &org, nil
 }
 
-// --- KEANGGOTAAN / MEMBERSHIP (2 LAPIS VERIFIKASI) ---
+func (r *OrgRepository) GetOrgByID(id uint) (*model.Organization, error) {
+	var org model.Organization
+	err := r.db.First(&org, id).Error
+	if err != nil {
+		return nil, err
+	}
+	return &org, nil
+}
 
-// RequestJoinOrg mengajukan pendaftaran anggota baru (status: PENDING)
+// UpdateOrgCustomSchema memperbarui skema form dinamis & kebijakan berkas
+func (r *OrgRepository) UpdateOrgCustomSchema(orgID uint, schemaJSON string, requireDoc bool, docType string) error {
+	return r.db.Model(&model.Organization{}).Where("id = ?", orgID).Updates(map[string]interface{}{
+		"custom_fields_schema": schemaJSON,
+		"require_document":     requireDoc,
+		"document_type":        docType,
+	}).Error
+}
+
+// --- 2. KEANGGOTAAN / DYNAMIC BIODATA ---
+
 func (r *OrgRepository) RequestJoinOrg(member *model.OrganizationMember) error {
 	return r.db.Create(member).Error
 }
 
-// GetMembershipByUser mengambil status keanggotaan aktif dari seorang user
 func (r *OrgRepository) GetMembershipByUser(userID uint) (*model.OrganizationMember, error) {
 	var member model.OrganizationMember
 	err := r.db.Preload("Organization").Where("user_id = ?", userID).First(&member).Error
@@ -68,28 +81,69 @@ func (r *OrgRepository) GetMembershipByUser(userID uint) (*model.OrganizationMem
 	return &member, nil
 }
 
-// GetPendingMembersByOrg mengambil daftar calon peminjam yang menunggu persetujuan Admin
 func (r *OrgRepository) GetPendingMembersByOrg(orgID uint) ([]model.OrganizationMember, error) {
 	var members []model.OrganizationMember
 	err := r.db.Preload("User").Where("organization_id = ?", orgID).Order("created_at desc").Find(&members).Error
 	return members, err
 }
 
-// UpdateMemberStatus menyetujui (APPROVED) atau menolak (REJECTED) keanggotaan
 func (r *OrgRepository) UpdateMemberStatus(memberID uint, status string) error {
 	return r.db.Model(&model.OrganizationMember{}).Where("id = ?", memberID).Update("status", status).Error
 }
 
-// --- INVENTARIS ALAT / EQUIPMENT ---
+// --- 3. INVENTARIS DENGAN LOGIKA DEDUPLIKASI STOK ---
 
-// CreateEquipment menambahkan barang baru milik organisasi
-func (r *OrgRepository) CreateEquipment(eq *model.Equipment) error {
-	return r.db.Create(eq).Error
+// AddOrIncrementEquipment menambahkan alat baru, atau menambah kuantitas jika alat sudah terdaftar
+func (r *OrgRepository) AddOrIncrementEquipment(orgID uint, code, name, category, desc string, qty int) (*model.Equipment, error) {
+	var existing model.Equipment
+	// Cari apakah alat dengan Kode atau Nama yang sama sudah ada di organisasi ini
+	err := r.db.Where("organization_id = ? AND (code = ? OR name = ?)", orgID, code, name).First(&existing).Error
+
+	if err == nil {
+		// ALAT SUDAH ADA: Lakukan increment kuantitas (Deduplikasi)
+		existing.TotalQuantity += qty
+		existing.AvailableQuantity += qty
+		if desc != "" {
+			existing.Description = desc
+		}
+		if err := r.db.Save(&existing).Error; err != nil {
+			return nil, err
+		}
+		return &existing, nil
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+
+	// ALAT BELUM ADA: Buat entri baru
+	newEq := model.Equipment{
+		OrganizationID:    orgID,
+		Code:              code,
+		Name:              name,
+		Category:          category,
+		Description:       desc,
+		TotalQuantity:     qty,
+		AvailableQuantity: qty,
+		Condition:         "BAIK",
+		Status:            "AVAILABLE",
+	}
+
+	if err := r.db.Create(&newEq).Error; err != nil {
+		return nil, err
+	}
+	return &newEq, nil
 }
 
-// GetEquipmentsByOrg mengambil seluruh alat milik organisasi
 func (r *OrgRepository) GetEquipmentsByOrg(orgID uint) ([]model.Equipment, error) {
 	var equipments []model.Equipment
 	err := r.db.Where("organization_id = ?", orgID).Order("created_at desc").Find(&equipments).Error
 	return equipments, err
+}
+
+func (r *OrgRepository) GetEquipmentByID(id uint) (*model.Equipment, error) {
+	var eq model.Equipment
+	err := r.db.First(&eq, id).Error
+	if err != nil {
+		return nil, err
+	}
+	return &eq, nil
 }

@@ -53,21 +53,20 @@ func main() {
 		})
 	})
 
-	// 8. Rute API v1
+		// 8. Rute API v1
 	apiV1 := r.Group("/api/v1")
 	{
-		// Rute Autentikasi Publik
+		// Autentikasi Publik
 		authGroup := apiV1.Group("/auth")
 		{
 			authGroup.POST("/register", authHandler.Register)
 			authGroup.POST("/login", authHandler.Login)
 		}
 
-		// Rute Terproteksi (Wajib Membawa Token JWT Valid)
+		// Terproteksi (Wajib Login)
 		protected := apiV1.Group("")
 		protected.Use(middleware.AuthMiddleware(cfg.JWTSecret))
 		{
-			// Profil Akun
 			protected.GET("/auth/me", authHandler.GetProfile)
 
 			// --- MODUL ORGANISASI & KEANGGOTAAN ---
@@ -81,16 +80,22 @@ func main() {
 			{
 				adminOrgGroup.POST("", orgHandler.CreateOrganization)
 				adminOrgGroup.GET("", orgHandler.GetMyOrganization)
+				adminOrgGroup.PATCH("/schema", orgHandler.UpdateCustomSchema)
 				adminOrgGroup.GET("/members", orgHandler.GetPendingMembers)
 				adminOrgGroup.PATCH("/members/:id", orgHandler.VerifyMember)
 				adminOrgGroup.POST("/equipments", orgHandler.AddEquipment)
+				adminOrgGroup.GET("/loans", loanHandler.GetOrgLoans)
+				adminOrgGroup.PATCH("/loans/:id/approve", loanHandler.ApproveLoan)
+				adminOrgGroup.PATCH("/loans/:id/reject", loanHandler.RejectLoan)
+				adminOrgGroup.POST("/loans/:id/return-confirm", loanHandler.ConfirmReturn)
 			}
 
-			// --- MODUL PEMINJAMAN ALAT ---
+			// --- MODUL PEMINJAMAN ALAT (USER & ADMIN) ---
 			loansGroup := protected.Group("/loans")
 			{
 				loansGroup.POST("", loanHandler.CreateLoan)
 				loansGroup.GET("/my", loanHandler.GetUserLoans)
+				loansGroup.POST("/:id/return-request", loanHandler.RequestReturn)
 				loansGroup.GET("/:id/download", loanHandler.DownloadDecryptedFile)
 			}
 
@@ -103,9 +108,10 @@ func main() {
 				vaultGroup.POST("/files/:id/sign", vaultHandler.SignDocument)
 				vaultGroup.GET("/files/:id/verify", vaultHandler.VerifySignature)
 				
-				// Secure Data Sharing antar-user
+				// Secure Data Sharing
 				vaultGroup.POST("/share/request", vaultHandler.RequestAccess)
 				vaultGroup.POST("/share/requests/:id/approve", vaultHandler.ApproveShareRequest)
+				vaultGroup.POST("/share/requests/:id/revoke", vaultHandler.RevokeShareAccess)
 			}
 		}
 	}

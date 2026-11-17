@@ -5,6 +5,8 @@ import (
 
 	"gorm.io/gorm"
 	"pmo-backend/internal/model"
+
+	"time"
 )
 
 type VaultRepository struct {
@@ -121,4 +123,24 @@ func (r *VaultRepository) ApproveShareRequest(requestID uint, encryptedKeyForReq
 // RejectShareRequest menolak permintaan akses berkas
 func (r *VaultRepository) RejectShareRequest(requestID uint) error {
 	return r.db.Model(&model.FileShareRequest{}).Where("id = ?", requestID).Update("status", "REJECTED").Error
+}
+
+// LogActivity mencatat jejak audit aktivitas berkas/kriptografi
+func (r *VaultRepository) LogActivity(userID uint, action, details string) error {
+	log := model.ActivityLog{
+		UserID:    userID,
+		Action:    action,
+		Details:   details,
+		CreatedAt: time.Now(),
+	}
+	return r.db.Create(&log).Error
+}
+
+// RevokeShareRequest mencabut hak akses berkas yang sebelumnya telah disetujui
+func (r *VaultRepository) RevokeShareRequest(requestID uint) error {
+	now := time.Now()
+	return r.db.Model(&model.FileShareRequest{}).Where("id = ?", requestID).Updates(map[string]interface{}{
+		"status":     "REVOKED",
+		"revoked_at": &now,
+	}).Error
 }
