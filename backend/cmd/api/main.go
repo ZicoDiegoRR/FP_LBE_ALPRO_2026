@@ -30,12 +30,14 @@ func main() {
 	userRepo := repository.NewUserRepository(db)
 	orgRepo := repository.NewOrgRepository(db)
 	loanRepo := repository.NewLoanRepository(db)
+	vaultRepo := repository.NewVaultRepository(db)
 	cryptoService := crypto.NewCryptoService()
 
 	// 5. Inisialisasi Handler Layer
 	authHandler := handler.NewAuthHandler(userRepo, cfg)
 	orgHandler := handler.NewOrgHandler(orgRepo)
 	loanHandler := handler.NewLoanHandler(loanRepo, orgRepo, cryptoService, cfg)
+	vaultHandler := handler.NewVaultHandler(vaultRepo, cryptoService, cfg)
 
 	// 6. Inisialisasi Gin Engine & Middleware Global
 	r := gin.Default()
@@ -69,12 +71,11 @@ func main() {
 			protected.GET("/auth/me", authHandler.GetProfile)
 
 			// --- MODUL ORGANISASI & KEANGGOTAAN ---
-			// Untuk User/Peminjam
 			protected.POST("/orgs/join", orgHandler.JoinOrganization)
 			protected.GET("/orgs/my-membership", orgHandler.GetMyMembership)
 			protected.GET("/equipments", orgHandler.GetEquipments)
 
-			// Untuk Admin Organisasi (RBAC)
+			// Khusus Admin Organisasi
 			adminOrgGroup := protected.Group("/admin/org")
 			adminOrgGroup.Use(middleware.RequireRole("admin"))
 			{
@@ -85,12 +86,26 @@ func main() {
 				adminOrgGroup.POST("/equipments", orgHandler.AddEquipment)
 			}
 
-			// --- MODUL PEMINJAMAN & FILE TERENKRIPSI ---
+			// --- MODUL PEMINJAMAN ALAT ---
 			loansGroup := protected.Group("/loans")
 			{
 				loansGroup.POST("", loanHandler.CreateLoan)
 				loansGroup.GET("/my", loanHandler.GetUserLoans)
 				loansGroup.GET("/:id/download", loanHandler.DownloadDecryptedFile)
+			}
+
+			// --- MODUL BRANKAS KRIPTOGRAFI, DIGITAL SIGNATURE, & FILE SHARING ---
+			vaultGroup := protected.Group("/vault")
+			{
+				vaultGroup.POST("/keys/generate", vaultHandler.GenerateKeyPair)
+				vaultGroup.GET("/files", vaultHandler.GetMyVaultFiles)
+				vaultGroup.POST("/files", vaultHandler.UploadVaultFile)
+				vaultGroup.POST("/files/:id/sign", vaultHandler.SignDocument)
+				vaultGroup.GET("/files/:id/verify", vaultHandler.VerifySignature)
+				
+				// Secure Data Sharing antar-user
+				vaultGroup.POST("/share/request", vaultHandler.RequestAccess)
+				vaultGroup.POST("/share/requests/:id/approve", vaultHandler.ApproveShareRequest)
 			}
 		}
 	}
