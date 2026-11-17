@@ -4,20 +4,24 @@ import (
 	"time"
 )
 
-// Loan merepresentasikan permohonan peminjaman dan arsip file terenkripsi
+// Loan merepresentasikan riwayat peminjaman barang oleh anggota yang sudah disetujui
 type Loan struct {
-	ID             uint      `gorm:"primaryKey" json:"id"`
-	UserID         uint      `gorm:"not null;index" json:"user_id"`
-	User           User      `gorm:"constraint:OnUpdate:CASCADE,OnDelete:CASCADE;" json:"user,omitempty"`
-	ItemName       string    `gorm:"not null;size:100" json:"item_name"`
-	Description    string    `gorm:"type:text" json:"description"`
-	Status         string    `gorm:"default:'PENDING';size:20" json:"status"` // PENDING, APPROVED, REJECTED
+	ID               uint         `gorm:"primaryKey" json:"id"`
+	UserID           uint         `gorm:"not null;index" json:"user_id"`
+	User             User         `gorm:"foreignKey:UserID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE;" json:"user,omitempty"`
+	OrganizationID   uint         `gorm:"not null;index" json:"organization_id"`
+	Organization     Organization `gorm:"foreignKey:OrganizationID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE;" json:"organization,omitempty"`
+	EquipmentID      uint         `gorm:"not null;index" json:"equipment_id"`
+	Equipment        Equipment    `gorm:"foreignKey:EquipmentID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE;" json:"equipment,omitempty"`
 	
-	// Data Kriptografi File Pendukung
-	OriginalFilename string  `gorm:"size:255" json:"original_filename"`
-	EncryptedPath    string  `gorm:"size:255" json:"encrypted_path"`
-	CryptoAlgorithm  string  `gorm:"size:10" json:"crypto_algorithm"` // AES, DES, atau RC4
+	Purpose          string       `gorm:"type:text" json:"purpose"`
+	Status           string       `gorm:"default:'PENDING';size:20" json:"status"` // PENDING, APPROVED, REJECTED, RETURNED
 	
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	// Dokumen Persyaratan Terenkripsi (Zero-Plaintext at Rest)
+	OriginalFilename string       `gorm:"size:255" json:"original_filename"`
+	EncryptedPath    string       `gorm:"size:255" json:"encrypted_path"`
+	CryptoAlgorithm  string       `gorm:"size:10" json:"crypto_algorithm"` // AES, DES, RC4
+	
+	CreatedAt        time.Time    `json:"created_at"`
+	UpdatedAt        time.Time    `json:"updated_at"`
 }

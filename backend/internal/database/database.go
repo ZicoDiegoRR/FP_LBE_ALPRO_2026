@@ -34,9 +34,17 @@ func ConnectDB(cfg *config.Config) (*gorm.DB, error) {
 	log.Println("[INFO] Koneksi database berhasil diinisialisasi")
 
 	// Auto-Migrasi skema database berdasarkan struct Model
+		// Auto-Migrasi skema database lengkap
+		// Auto-Migrasi skema database lengkap
 	err = db.AutoMigrate(
 		&model.User{},
+		&model.Organization{},
+		&model.OrganizationMember{},
+		&model.Equipment{},
 		&model.Loan{},
+		&model.UserKeyPair{},
+		&model.VaultFile{},
+		&model.FileShareRequest{},
 	)
 	if err != nil {
 		return nil, fmt.Errorf("gagal melakukan auto-migrasi tabel: %w", err)

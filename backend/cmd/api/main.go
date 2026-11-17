@@ -26,14 +26,16 @@ func main() {
 		log.Fatalf("Kesalahan database fatal: %v", err)
 	}
 
-	// 4. Inisialisasi Service & Repository Layer
+	// 4. Inisialisasi Repository Layer
 	userRepo := repository.NewUserRepository(db)
+	orgRepo := repository.NewOrgRepository(db)
 	loanRepo := repository.NewLoanRepository(db)
 	cryptoService := crypto.NewCryptoService()
 
 	// 5. Inisialisasi Handler Layer
 	authHandler := handler.NewAuthHandler(userRepo, cfg)
-	loanHandler := handler.NewLoanHandler(loanRepo, cryptoService, cfg)
+	orgHandler := handler.NewOrgHandler(orgRepo)
+	loanHandler := handler.NewLoanHandler(loanRepo, orgRepo, cryptoService, cfg)
 
 	// 6. Inisialisasi Gin Engine & Middleware Global
 	r := gin.Default()
@@ -63,22 +65,32 @@ func main() {
 		protected := apiV1.Group("")
 		protected.Use(middleware.AuthMiddleware(cfg.JWTSecret))
 		{
-			// Profil User
+			// Profil Akun
 			protected.GET("/auth/me", authHandler.GetProfile)
 
-			// Peminjaman & Kriptografi File
+			// --- MODUL ORGANISASI & KEANGGOTAAN ---
+			// Untuk User/Peminjam
+			protected.POST("/orgs/join", orgHandler.JoinOrganization)
+			protected.GET("/orgs/my-membership", orgHandler.GetMyMembership)
+			protected.GET("/equipments", orgHandler.GetEquipments)
+
+			// Untuk Admin Organisasi (RBAC)
+			adminOrgGroup := protected.Group("/admin/org")
+			adminOrgGroup.Use(middleware.RequireRole("admin"))
+			{
+				adminOrgGroup.POST("", orgHandler.CreateOrganization)
+				adminOrgGroup.GET("", orgHandler.GetMyOrganization)
+				adminOrgGroup.GET("/members", orgHandler.GetPendingMembers)
+				adminOrgGroup.PATCH("/members/:id", orgHandler.VerifyMember)
+				adminOrgGroup.POST("/equipments", orgHandler.AddEquipment)
+			}
+
+			// --- MODUL PEMINJAMAN & FILE TERENKRIPSI ---
 			loansGroup := protected.Group("/loans")
 			{
 				loansGroup.POST("", loanHandler.CreateLoan)
 				loansGroup.GET("/my", loanHandler.GetUserLoans)
 				loansGroup.GET("/:id/download", loanHandler.DownloadDecryptedFile)
-			}
-
-			// Rute Khusus Admin (Role-Based Access Control)
-			adminGroup := protected.Group("/admin")
-			adminGroup.Use(middleware.RequireRole("admin"))
-			{
-				adminGroup.GET("/loans", loanHandler.GetAllLoans)
 			}
 		}
 	}

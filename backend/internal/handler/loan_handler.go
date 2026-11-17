@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -14,84 +15,77 @@ import (
 	"pmo-backend/internal/crypto"
 	"pmo-backend/internal/model"
 	"pmo-backend/internal/repository"
-
-	"strings"
 )
 
-// LoanHandler mengelola alur HTTP peminjaman dan arsip file terenkripsi
 type LoanHandler struct {
 	loanRepo      *repository.LoanRepository
+	orgRepo       *repository.OrgRepository
 	cryptoService *crypto.CryptoService
 	cfg           *config.Config
 }
 
-// NewLoanHandler membuat instance baru LoanHandler
-func NewLoanHandler(loanRepo *repository.LoanRepository, cryptoService *crypto.CryptoService, cfg *config.Config) *LoanHandler {
-	// Pastikan direktori penyimpanan file terenkripsi sudah ada
+func NewLoanHandler(
+	loanRepo *repository.LoanRepository,
+	orgRepo *repository.OrgRepository,
+	cryptoService *crypto.CryptoService,
+	cfg *config.Config,
+) *LoanHandler {
 	if err := os.MkdirAll(cfg.StoragePath, 0755); err != nil {
 		fmt.Printf("[WARN] Gagal membuat direktori storage: %v\n", err)
 	}
 
 	return &LoanHandler{
 		loanRepo:      loanRepo,
+		orgRepo:       orgRepo,
 		cryptoService: cryptoService,
 		cfg:           cfg,
 	}
 }
 
-// helper untuk mengambil key yang sesuai dengan algoritma dari config
 func (h *LoanHandler) getKeyByAlgorithm(algo string) ([]byte, error) {
 	cleanAlgo := strings.TrimSpace(strings.ToUpper(algo))
-
 	switch cleanAlgo {
 	case "AES":
-		key := strings.TrimSpace(h.cfg.CryptoKeyAES)
-		return []byte(key), nil
+		return []byte(strings.TrimSpace(h.cfg.CryptoKeyAES)), nil
 	case "DES":
-		key := strings.TrimSpace(h.cfg.CryptoKeyDES)
-		return []byte(key), nil
+		return []byte(strings.TrimSpace(h.cfg.CryptoKeyDES)), nil
 	case "RC4":
-		key := strings.TrimSpace(h.cfg.CryptoKeyRC4)
-		return []byte(key), nil
+		return []byte(strings.TrimSpace(h.cfg.CryptoKeyRC4)), nil
 	default:
 		return nil, fmt.Errorf("algoritma tidak dikenali: %s", algo)
 	}
 }
 
-// CreateLoan menangani pembuatan pengajuan peminjaman + enkripsi file dokumen
+// CreateLoan mengajukan peminjaman alat (dengan enkripsi file syarat)
 func (h *LoanHandler) CreateLoan(c *gin.Context) {
-	// 1. Ambil User ID dari context JWT (diisi oleh AuthMiddleware)
-	userIDVal, exists := c.Get("user_id")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Sesi tidak valid"})
-		return
-	}
-	userID := userIDVal.(uint)
+	userID := c.MustGet("user_id").(uint)
 
-	// 2. Baca form data
-	itemName := c.PostForm("item_name")
-	description := c.PostForm("description")
-	algorithm := c.DefaultPostForm("crypto_algorithm", "AES") // Default: AES
-
-	if itemName == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Nama barang/peminjaman wajib diisi"})
+	// Verifikasi Keanggotaan: Peminjam WAJIB disetujui (APPROVED) terlebih dahulu
+	membership, err := h.orgRepo.GetMembershipByUser(userID)
+	if err != nil || membership == nil || membership.Status != "APPROVED" {
+		c.JSON(http.StatusForbidden, gin.H{
+			"error": "Akses ditolak: Anda belum terdaftar atau belum disetujui sebagai anggota organisasi",
+		})
 		return
 	}
 
-	// 3. Baca file dokumen yang diunggah
+	equipmentIDStr := c.PostForm("equipment_id")
+	equipmentID, err := strconv.ParseUint(equipmentIDStr, 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ID alat tidak valid"})
+		return
+	}
+
+	purpose := c.PostForm("purpose")
+	algorithm := c.DefaultPostForm("crypto_algorithm", "AES")
+
+	// Baca file dokumen persyaratan (misal: KTM / Surat)
 	fileHeader, err := c.FormFile("document")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Dokumen pendukung (file) wajib diunggah"})
 		return
 	}
 
-	// Batasi ukuran maksimal file (misal: 10 MB) untuk mencegah DoS
-	if fileHeader.Size > 10*1024*1024 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Ukuran file melebihi batas maksimal 10MB"})
-		return
-	}
-
-	// Buka stream file
 	file, err := fileHeader.Open()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal membaca file"})
@@ -99,42 +93,40 @@ func (h *LoanHandler) CreateLoan(c *gin.Context) {
 	}
 	defer file.Close()
 
-	// Baca seluruh byte file ke RAM (Plaintext)
 	fileBytes, err := io.ReadAll(file)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal memproses byte file"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal membaca byte file"})
 		return
 	}
 
-	// 4. Ambil kunci kriptografi yang sesuai dari server config
 	key, err := h.getKeyByAlgorithm(algorithm)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	// 5. ENKRIPSI FILE ON-THE-FLY DI MEMORI (Zero Plaintext at Rest)
+	// ENKRIPSI IN-MEMORY (Zero-Plaintext at Rest)
 	encryptedData, err := h.cryptoService.Encrypt(fileBytes, algorithm, key)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Proses enkripsi dokumen gagal: " + err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Enkripsi gagal: " + err.Error()})
 		return
 	}
 
-	// 6. Simpan data terenkripsi ke disk dengan nama unik
+	// Simpan ciphertext ke disk
 	timestamp := time.Now().UnixNano()
 	safeFilename := fmt.Sprintf("%d_%s.enc", timestamp, filepath.Base(fileHeader.Filename))
 	destinationPath := filepath.Join(h.cfg.StoragePath, safeFilename)
 
 	if err := os.WriteFile(destinationPath, encryptedData, 0600); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal menyimpan file terenkripsi ke storage"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal menyimpan file terenkripsi"})
 		return
 	}
 
-	// 7. Simpan metadata peminjaman ke database
 	loan := model.Loan{
 		UserID:           userID,
-		ItemName:         itemName,
-		Description:      description,
+		OrganizationID:   membership.OrganizationID,
+		EquipmentID:      uint(equipmentID),
+		Purpose:          purpose,
 		Status:           "PENDING",
 		OriginalFilename: fileHeader.Filename,
 		EncryptedPath:    destinationPath,
@@ -142,50 +134,32 @@ func (h *LoanHandler) CreateLoan(c *gin.Context) {
 	}
 
 	if err := h.loanRepo.CreateLoan(&loan); err != nil {
-		// Rollback file jika insert database gagal
 		os.Remove(destinationPath)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal menyimpan data pengajuan"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal menyimpan pengajuan peminjaman"})
 		return
 	}
 
 	c.JSON(http.StatusCreated, gin.H{
-		"message": "Pengajuan peminjaman berhasil dibuat dan dokumen telah diamankan!",
+		"message": "Pengajuan peminjaman berhasil dan dokumen telah diamankan!",
 		"loan":    loan,
 	})
 }
 
-// GetUserLoans mengambil seluruh daftar peminjaman milik user yang sedang login
+// GetUserLoans mengambil riwayat peminjaman milik peminjam saat ini
 func (h *LoanHandler) GetUserLoans(c *gin.Context) {
 	userID := c.MustGet("user_id").(uint)
-
 	loans, err := h.loanRepo.GetLoansByUserID(userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mengambil daftar peminjaman"})
 		return
 	}
-
 	c.JSON(http.StatusOK, gin.H{"loans": loans})
 }
 
-// GetAllLoans mengambil seluruh peminjaman dari semua user (khusus role Admin)
-func (h *LoanHandler) GetAllLoans(c *gin.Context) {
-	loans, err := h.loanRepo.GetAllLoans()
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mengambil data peminjaman"})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{"loans": loans})
-}
-
-// DownloadDecryptedFile membaca file terenkripsi, mendekripsinya kembali, lalu mengirimkannya ke browser
+// DownloadDecryptedFile mendekripsi file dan mengembalikannya ke user yang berhak
 func (h *LoanHandler) DownloadDecryptedFile(c *gin.Context) {
 	loanIDStr := c.Param("id")
-	loanID, err := strconv.ParseUint(loanIDStr, 10, 32)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "ID peminjaman tidak valid"})
-		return
-	}
+	loanID, _ := strconv.ParseUint(loanIDStr, 10, 32)
 
 	loan, err := h.loanRepo.GetLoanByID(uint(loanID))
 	if err != nil || loan == nil {
@@ -193,37 +167,33 @@ func (h *LoanHandler) DownloadDecryptedFile(c *gin.Context) {
 		return
 	}
 
-	// Authorization Check: Hanya pemilik dokumen atau Admin yang boleh mengunduh
 	currentUserID := c.MustGet("user_id").(uint)
 	currentUserRole := c.MustGet("role").(string)
 
+	// Pemilik file ATAU Admin organisasi berhak mengunduh
 	if loan.UserID != currentUserID && currentUserRole != "admin" {
-		c.JSON(http.StatusForbidden, gin.H{"error": "Akses ditolak: Anda bukan pemilik file ini"})
+		c.JSON(http.StatusForbidden, gin.H{"error": "Akses ditolak: Anda tidak memiliki wewenang mengunduh berkas ini"})
 		return
 	}
 
-	// 1. Baca file ciphertext dari disk
 	encryptedData, err := os.ReadFile(loan.EncryptedPath)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "File fisik terenkripsi tidak ditemukan di server"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "File terenkripsi tidak ditemukan"})
 		return
 	}
 
-	// 2. Ambil kunci kriptografi
 	key, err := h.getKeyByAlgorithm(loan.CryptoAlgorithm)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Kunci enkripsi tidak valid"})
 		return
 	}
 
-	// 3. DEKRIPSI ON-THE-FLY
 	decryptedPlaintext, err := h.cryptoService.Decrypt(encryptedData, loan.CryptoAlgorithm, key)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mendekripsi file: integritas data rusak atau kunci salah"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Dekripsi gagal: " + err.Error()})
 		return
 	}
 
-	// 4. Kirim file plaintext ke browser sebagai attachment download
 	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s", loan.OriginalFilename))
 	c.Header("Content-Type", "application/octet-stream")
 	c.Data(http.StatusOK, "application/octet-stream", decryptedPlaintext)
