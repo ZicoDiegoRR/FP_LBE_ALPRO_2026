@@ -1,0 +1,33 @@
+# Environment & Secrets (SANGAT PENTING)
+.env
+*.env.local
+
+# Binaries & Build Output
+bin/
+dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# SQLite Database Files
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# Uploaded Files & Decrypted Temp Storage
+uploads/
+storage/
+temp/
+
+# IDE & OS Specific
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Go Test & Coverage
+*.out
+*.test
