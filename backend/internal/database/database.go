@@ -45,6 +45,7 @@ func ConnectDB(cfg *config.Config) (*gorm.DB, error) {
 		&model.UserKeyPair{},
 		&model.VaultFile{},
 		&model.FileShareRequest{},
+		&model.ActivityLog{},
 	)
 	if err != nil {
 		return nil, fmt.Errorf("gagal melakukan auto-migrasi tabel: %w", err)

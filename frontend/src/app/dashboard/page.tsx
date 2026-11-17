@@ -5,7 +5,6 @@ import { useRouter } from 'next/navigation';
 import { 
   Shield, 
   Plus, 
-  Users, 
   Package, 
   Key, 
   LogOut, 
@@ -16,16 +15,22 @@ import {
   Lock,
   Download,
   Building,
-  UserCheck
+  UserCheck,
+  FileCheck,
+  FileText,
+  Fingerprint,
+  Share2,
+  FolderLock
 } from 'lucide-react';
 import { apiRequest, clearStoredToken, getStoredToken } from '@/lib/api';
 
 export default function DashboardPage() {
   const router = useRouter();
 
-  // State Utama Pengguna
+  // State Utama Pengguna & Navigasi Tab
   const [user, setUser] = useState<{ id: number; username: string; role: string } | null>(null);
   const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<'inventory' | 'vault'>('inventory');
 
   // State Khusus ADMIN
   const [myOrg, setMyOrg] = useState<any>(null);
@@ -44,12 +49,18 @@ export default function DashboardPage() {
   const [phoneNumber, setPhoneNumber] = useState('');
   const [joinReason, setJoinReason] = useState('');
 
-  // State Form Peminjaman & Kriptografi
+  // State Peminjaman Alat
   const [selectedEqId, setSelectedEqId] = useState('');
   const [loanPurpose, setLoanPurpose] = useState('');
   const [cryptoAlgo, setCryptoAlgo] = useState('AES');
   const [docFile, setDocFile] = useState<File | null>(null);
   const [myLoans, setMyLoans] = useState<any[]>([]);
+
+  // State BRANKAS DIGITAL & DIGITAL SIGNATURE (VAULT)
+  const [hasRSAKey, setHasRSAKey] = useState(false);
+  const [publicKeyPEM, setPublicKeyPEM] = useState('');
+  const [vaultFiles, setVaultFiles] = useState<any[]>([]);
+  const [vaultUploadFile, setVaultUploadFile] = useState<File | null>(null);
 
   // Notifikasi Feedback
   const [msg, setMsg] = useState<{ type: 'error' | 'success'; text: string } | null>(null);
@@ -70,12 +81,13 @@ export default function DashboardPage() {
       const currentUser = profileRes.user;
       setUser(currentUser);
 
+      // Ambil Berkas Brankas Pribadi
+      loadVaultData();
+
       if (currentUser.role === 'admin') {
-        // Ambil Data Organisasi Milik Admin
         const orgRes: any = await apiRequest('/admin/org');
         if (orgRes.organization) {
           setMyOrg(orgRes.organization);
-          // Ambil Calon Anggota & Inventaris
           const [membersRes, eqRes]: [any, any] = await Promise.all([
             apiRequest('/admin/org/members'),
             apiRequest('/equipments'),
@@ -84,12 +96,10 @@ export default function DashboardPage() {
           setEquipments(eqRes.equipments || []);
         }
       } else {
-        // Ambil Data Keanggotaan Peminjam
         const memberRes: any = await apiRequest('/orgs/my-membership');
         setMembership(memberRes.membership);
 
         if (memberRes.membership?.status === 'APPROVED') {
-          // Jika sudah approved, ambil daftar alat & riwayat peminjaman
           const [eqRes, loansRes]: [any, any] = await Promise.all([
             apiRequest('/equipments'),
             apiRequest('/loans/my'),
@@ -102,6 +112,15 @@ export default function DashboardPage() {
       console.error(err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadVaultData = async () => {
+    try {
+      const res: any = await apiRequest('/vault/files');
+      setVaultFiles(res.files || []);
+    } catch (err) {
+      console.error(err);
     }
   };
 
@@ -202,11 +221,7 @@ export default function DashboardPage() {
       formData.append('crypto_algorithm', cryptoAlgo);
       formData.append('document', docFile);
 
-      await apiRequest('/loans', {
-        method: 'POST',
-        body: formData,
-      });
-
+      await apiRequest('/loans', { method: 'POST', body: formData });
       setMsg({ type: 'success', text: `Pengajuan berhasil! Dokumen diamankan dengan algoritma ${cryptoAlgo}.` });
       setLoanPurpose('');
       setDocFile(null);
@@ -218,26 +233,66 @@ export default function DashboardPage() {
     }
   };
 
-  const handleDownloadFile = async (loanId: number, filename: string) => {
+  // --- HANDLER VAULT & DIGITAL SIGNATURE ---
+  const handleGenerateRSA = async () => {
+    setActionLoading(true);
+    setMsg(null);
     try {
-      const token = getStoredToken();
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080/api/v1';
-      const response = await fetch(`${apiUrl}/loans/${loanId}/download`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!response.ok) throw new Error('Gagal mendekripsi berkas');
-
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
+      const res: any = await apiRequest('/vault/keys/generate', { method: 'POST' });
+      setPublicKeyPEM(res.public_key);
+      setHasRSAKey(true);
+      setMsg({ type: 'success', text: 'Pasangan Kunci RSA 2048-bit berhasil diaktifkan!' });
     } catch (err: any) {
-      alert(err.message);
+      setMsg({ type: 'error', text: err.message });
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleUploadVault = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!vaultUploadFile) return;
+    setActionLoading(true);
+    setMsg(null);
+    try {
+      const formData = new FormData();
+      formData.append('document', vaultUploadFile);
+
+      await apiRequest('/vault/files', { method: 'POST', body: formData });
+      setMsg({ type: 'success', text: 'Dokumen berhasil dienkripsi dan disimpan di Brankas Digital!' });
+      setVaultUploadFile(null);
+      loadVaultData();
+    } catch (err: any) {
+      setMsg({ type: 'error', text: err.message });
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleSignFile = async (fileID: number) => {
+    setActionLoading(true);
+    setMsg(null);
+    try {
+      await apiRequest(`/vault/files/${fileID}/sign`, { method: 'POST' });
+      setMsg({ type: 'success', text: 'Dokumen resmi ditandatangani secara digital dengan RSA Private Key!' });
+      loadVaultData();
+    } catch (err: any) {
+      setMsg({ type: 'error', text: err.message });
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleVerifyFile = async (fileID: number) => {
+    try {
+      const res: any = await apiRequest(`/vault/files/${fileID}/verify`);
+      if (res.valid) {
+        alert(`VERIFIKASI BERHASIL ✅\n\nStatus: ${res.message}\nPenandatangan: ${res.signer}\nHash SHA-256: ${res.file_hash}`);
+      } else {
+        alert(`VERIFIKASI GAGAL ❌\n\n${res.message}`);
+      }
+    } catch (err: any) {
+      alert('Error saat verifikasi: ' + err.message);
     }
   };
 
@@ -261,12 +316,32 @@ export default function DashboardPage() {
             </div>
             <div>
               <h1 className="font-bold text-lg text-slate-900 leading-tight">Sistem PMO</h1>
-              <span className="text-xs text-slate-500 font-medium">Platform Peminjaman Terenkripsi</span>
+              <span className="text-xs text-slate-500 font-medium">Platform Peminjaman & Kriptografi Terpadu</span>
             </div>
           </div>
 
+          {/* Tab Navigasi Utama */}
+          <div className="flex items-center bg-slate-100 p-1 rounded-xl">
+            <button
+              onClick={() => setActiveTab('inventory')}
+              className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                activeTab === 'inventory' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-900'
+              }`}
+            >
+              Layanan Peminjaman
+            </button>
+            <button
+              onClick={() => setActiveTab('vault')}
+              className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                activeTab === 'vault' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-500 hover:text-slate-900'
+              }`}
+            >
+              <FolderLock className="w-3.5 h-3.5" /> Brankas Kriptografi
+            </button>
+          </div>
+
           <div className="flex items-center gap-4">
-            <div className="text-right">
+            <div className="text-right hidden sm:block">
               <p className="text-sm font-bold text-slate-800">{user?.username}</p>
               <span className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full font-bold ${
                 user?.role === 'admin' ? 'bg-purple-100 text-purple-700' : 'bg-emerald-100 text-emerald-700'
@@ -288,7 +363,7 @@ export default function DashboardPage() {
       {/* Main Container */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
         
-        {/* Notifikasi Global */}
+        {/* Notifikasi Feedback Global */}
         {msg && (
           <div className={`p-4 rounded-xl flex items-center gap-3 text-sm shadow-sm ${
             msg.type === 'success' 
@@ -301,452 +376,336 @@ export default function DashboardPage() {
         )}
 
         {/* ======================================================== */}
-        {/* TAMPILAN 1: KHUSUS ROLE ADMINISTRATOR (PENYEDIA BARANG) */}
+        {/* TAB 1: LAYANAN PEMINJAMAN BARANG & ORGANISASI           */}
         {/* ======================================================== */}
-        {user?.role === 'admin' && (
-          <div className="space-y-8">
-            
-            {/* JIKA ADMIN BELUM PUNYA ORGANISASI */}
-            {!myOrg ? (
-              <div className="max-w-xl mx-auto bg-white border border-slate-200 rounded-2xl p-8 shadow-sm text-center">
-                <Building className="w-12 h-12 mx-auto text-purple-600 mb-4" />
-                <h2 className="text-xl font-bold text-slate-900 mb-2">Buat Organisasi / Lab Penyedia</h2>
-                <p className="text-xs text-slate-500 mb-6">
-                  Sebagai Administrator, buat unit organisasi Anda terlebih dahulu agar dapat mengelola inventaris dan memverifikasi peminjam.
-                </p>
-                <form onSubmit={handleCreateOrg} className="space-y-4 text-left">
-                  <div>
-                    <label className="block text-xs font-semibold uppercase text-slate-700 mb-1">Nama Organisasi / Lab</label>
-                    <input
-                      type="text"
-                      required
-                      value={newOrgName}
-                      onChange={(e) => setNewOrgName(e.target.value)}
-                      placeholder="Contoh: Lab Algoritma & Pemrograman"
-                      className="w-full px-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold uppercase text-slate-700 mb-1">Deskripsi Singkat</label>
-                    <textarea
-                      rows={3}
-                      value={newOrgDesc}
-                      onChange={(e) => setNewOrgDesc(e.target.value)}
-                      placeholder="Jelaskan fasilitas dan ketentuan umum peminjaman..."
-                      className="w-full px-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm"
-                    />
-                  </div>
-                  <button
-                    type="submit"
-                    disabled={actionLoading}
-                    className="w-full py-3 bg-purple-600 hover:bg-purple-700 text-white font-semibold rounded-xl text-sm transition-all shadow-md shadow-purple-600/20"
-                  >
-                    {actionLoading ? 'Memproses...' : 'Daftarkan Organisasi'}
-                  </button>
-                </form>
-              </div>
-            ) : (
-              /* JIKA ADMIN SUDAH MEMILIKI ORGANISASI */
+        {activeTab === 'inventory' && (
+          <>
+            {/* TAMPILAN ADMIN */}
+            {user?.role === 'admin' && (
               <div className="space-y-8">
-                {/* Header Banner Organisasi */}
-                <div className="bg-gradient-to-r from-purple-800 to-indigo-900 rounded-2xl p-6 sm:p-8 text-white flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 shadow-lg">
-                  <div>
-                    <div className="inline-flex items-center gap-2 px-3 py-1 bg-white/10 rounded-full text-xs font-medium mb-3 backdrop-blur-sm">
-                      <Building className="w-3.5 h-3.5" /> Organisasi Aktif
-                    </div>
-                    <h2 className="text-2xl font-bold tracking-tight">{myOrg.name}</h2>
-                    <p className="text-xs text-purple-200 mt-1 max-w-xl">{myOrg.description || 'Tidak ada deskripsi'}</p>
-                  </div>
-                  <div className="bg-white/10 border border-white/20 p-4 rounded-xl text-center backdrop-blur-sm">
-                    <span className="text-[11px] text-purple-200 block uppercase tracking-wider font-semibold">Kode Redeem Gabung</span>
-                    <span className="text-2xl font-mono font-bold tracking-widest text-emerald-300">{myOrg.redeem_code}</span>
-                    <span className="text-[10px] text-purple-300 block mt-1">Bagikan kode ini ke peminjam</span>
-                  </div>
-                </div>
-
-                {/* Grid: Verifikasi Anggota & Inventaris Alat */}
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                  
-                  {/* Kolom 1: Verifikasi Permohonan Anggota (2 Lapis) */}
-                  <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-6">
-                    <div className="flex items-center justify-between mb-4">
-                      <div className="flex items-center gap-2">
-                        <UserCheck className="w-5 h-5 text-purple-600" />
-                        <h3 className="font-bold text-slate-900">Verifikasi Calon Peminjam</h3>
+                {!myOrg ? (
+                  <div className="max-w-xl mx-auto bg-white border border-slate-200 rounded-2xl p-8 shadow-sm text-center">
+                    <Building className="w-12 h-12 mx-auto text-purple-600 mb-4" />
+                    <h2 className="text-xl font-bold text-slate-900 mb-2">Buat Organisasi / Lab Penyedia</h2>
+                    <p className="text-xs text-slate-500 mb-6">
+                      Sebagai Administrator, buat unit organisasi Anda terlebih dahulu agar dapat mengelola inventaris.
+                    </p>
+                    <form onSubmit={handleCreateOrg} className="space-y-4 text-left text-xs">
+                      <div>
+                        <label className="block font-semibold uppercase text-slate-700 mb-1">Nama Organisasi / Lab</label>
+                        <input
+                          type="text"
+                          required
+                          value={newOrgName}
+                          onChange={(e) => setNewOrgName(e.target.value)}
+                          placeholder="Contoh: Lab Algoritma & Pemrograman"
+                          className="w-full px-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl"
+                        />
                       </div>
-                      <span className="text-xs px-2.5 py-0.5 bg-purple-100 text-purple-700 font-bold rounded-full">
-                        {pendingMembers.filter(m => m.status === 'PENDING').length} Menunggu
-                      </span>
-                    </div>
-
-                    {pendingMembers.length === 0 ? (
-                      <p className="text-xs text-slate-400 py-8 text-center">Belum ada pengajuan anggota baru.</p>
-                    ) : (
-                      <div className="space-y-3 max-h-96 overflow-y-auto pr-1">
-                        {pendingMembers.map((m) => (
-                          <div key={m.id} className="p-4 border border-slate-200 rounded-xl bg-slate-50 flex flex-col justify-between gap-3 text-xs">
-                            <div>
-                              <div className="flex justify-between items-start mb-1">
-                                <span className="font-bold text-slate-900 text-sm">{m.fullname}</span>
-                                <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
-                                  m.status === 'APPROVED' ? 'bg-emerald-100 text-emerald-800' :
-                                  m.status === 'REJECTED' ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-800'
-                                }`}>
-                                  {m.status}
-                                </span>
-                              </div>
-                              <p className="text-slate-600 font-medium">NIM/ID: {m.identity_number} | HP: {m.phone_number}</p>
-                              <p className="text-slate-500 mt-1 italic">&ldquo;{m.reason}&rdquo;</p>
-                            </div>
-
-                            {m.status === 'PENDING' && (
-                              <div className="flex gap-2 pt-2 border-t border-slate-200">
-                                <button
-                                  onClick={() => handleVerifyMember(m.id, 'APPROVED')}
-                                  className="flex-1 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-lg text-xs transition-colors flex items-center justify-center gap-1"
-                                >
-                                  <CheckCircle className="w-3.5 h-3.5" /> Setujui
-                                </button>
-                                <button
-                                  onClick={() => handleVerifyMember(m.id, 'REJECTED')}
-                                  className="flex-1 py-1.5 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-lg text-xs transition-colors flex items-center justify-center gap-1"
-                                >
-                                  <XCircle className="w-3.5 h-3.5" /> Tolak
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                        ))}
+                      <div>
+                        <label className="block font-semibold uppercase text-slate-700 mb-1">Deskripsi Singkat</label>
+                        <textarea
+                          rows={3}
+                          value={newOrgDesc}
+                          onChange={(e) => setNewOrgDesc(e.target.value)}
+                          placeholder="Jelaskan fasilitas dan ketentuan umum peminjaman..."
+                          className="w-full px-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl"
+                        />
                       </div>
-                    )}
-                  </div>
-
-                  {/* Kolom 2: Inventaris Barang Organisasi */}
-                  <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-6 space-y-6">
-                    <div className="flex items-center gap-2">
-                      <Package className="w-5 h-5 text-purple-600" />
-                      <h3 className="font-bold text-slate-900">Kelola Inventaris Alat</h3>
-                    </div>
-
-                    {/* Form Tambah Alat */}
-                    <form onSubmit={handleAddEquipment} className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3 text-xs">
-                      <span className="font-bold text-slate-800 block">Tambah Alat Baru</span>
-                      <input
-                        type="text"
-                        required
-                        value={newEqName}
-                        onChange={(e) => setNewEqName(e.target.value)}
-                        placeholder="Nama Alat (contoh: Proyektor Epson, Osiloskop)"
-                        className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs"
-                      />
-                      <input
-                        type="text"
-                        value={newEqDesc}
-                        onChange={(e) => setNewEqDesc(e.target.value)}
-                        placeholder="Deskripsi / No Seri"
-                        className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs"
-                      />
                       <button
                         type="submit"
                         disabled={actionLoading}
-                        className="w-full py-2 bg-purple-600 hover:bg-purple-700 text-white font-semibold rounded-lg text-xs transition-colors flex items-center justify-center gap-1"
+                        className="w-full py-3 bg-purple-600 hover:bg-purple-700 text-white font-semibold rounded-xl text-sm transition-all shadow-md shadow-purple-600/20"
                       >
-                        <Plus className="w-3.5 h-3.5" /> Tambah ke Inventaris
+                        {actionLoading ? 'Memproses...' : 'Daftarkan Organisasi'}
                       </button>
                     </form>
+                  </div>
+                ) : (
+                  <div className="space-y-8">
+                    <div className="bg-gradient-to-r from-purple-800 to-indigo-900 rounded-2xl p-6 sm:p-8 text-white flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 shadow-lg">
+                      <div>
+                        <div className="inline-flex items-center gap-2 px-3 py-1 bg-white/10 rounded-full text-xs font-medium mb-3 backdrop-blur-sm">
+                          <Building className="w-3.5 h-3.5" /> Organisasi Aktif
+                        </div>
+                        <h2 className="text-2xl font-bold tracking-tight">{myOrg.name}</h2>
+                        <p className="text-xs text-purple-200 mt-1 max-w-xl">{myOrg.description || 'Tanpa deskripsi'}</p>
+                      </div>
+                      <div className="bg-white/10 border border-white/20 p-4 rounded-xl text-center backdrop-blur-sm">
+                        <span className="text-[11px] text-purple-200 block uppercase tracking-wider font-semibold">Kode Redeem Gabung</span>
+                        <span className="text-2xl font-mono font-bold tracking-widest text-emerald-300">{myOrg.redeem_code}</span>
+                      </div>
+                    </div>
 
-                    {/* Daftar Alat Saat Ini */}
-                    <div className="space-y-2">
-                      <span className="text-xs font-bold text-slate-700 block">Daftar Alat ({equipments.length})</span>
-                      {equipments.length === 0 ? (
-                        <p className="text-xs text-slate-400 py-3 text-center">Belum ada alat yang didaftarkan.</p>
-                      ) : (
-                        <div className="divide-y divide-slate-100 max-h-56 overflow-y-auto">
-                          {equipments.map((eq) => (
-                            <div key={eq.id} className="py-2.5 flex justify-between items-center text-xs">
-                              <div>
-                                <span className="font-semibold text-slate-900 block">{eq.name}</span>
-                                <span className="text-slate-400 text-[11px]">{eq.description || 'Tanpa deskripsi'}</span>
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                      {/* Verifikasi Anggota */}
+                      <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-6">
+                        <div className="flex items-center justify-between mb-4">
+                          <div className="flex items-center gap-2">
+                            <UserCheck className="w-5 h-5 text-purple-600" />
+                            <h3 className="font-bold text-slate-900 text-sm">Verifikasi Calon Peminjam</h3>
+                          </div>
+                          <span className="text-xs px-2.5 py-0.5 bg-purple-100 text-purple-700 font-bold rounded-full">
+                            {pendingMembers.filter(m => m.status === 'PENDING').length} Menunggu
+                          </span>
+                        </div>
+                        {pendingMembers.length === 0 ? (
+                          <p className="text-xs text-slate-400 py-8 text-center">Belum ada pengajuan anggota.</p>
+                        ) : (
+                          <div className="space-y-3 max-h-80 overflow-y-auto">
+                            {pendingMembers.map((m) => (
+                              <div key={m.id} className="p-3.5 border border-slate-200 rounded-xl bg-slate-50 text-xs">
+                                <div className="flex justify-between items-start mb-1">
+                                  <span className="font-bold text-slate-900">{m.fullname}</span>
+                                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                    m.status === 'APPROVED' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+                                  }`}>{m.status}</span>
+                                </div>
+                                <p className="text-slate-500">NIM: {m.identity_number} | HP: {m.phone_number}</p>
+                                <p className="text-slate-600 italic mt-1">&ldquo;{m.reason}&rdquo;</p>
+                                {m.status === 'PENDING' && (
+                                  <div className="flex gap-2 mt-2 pt-2 border-t border-slate-200">
+                                    <button onClick={() => handleVerifyMember(m.id, 'APPROVED')} className="flex-1 py-1 bg-emerald-600 text-white rounded font-bold text-[11px]">Setujui</button>
+                                    <button onClick={() => handleVerifyMember(m.id, 'REJECTED')} className="flex-1 py-1 bg-red-600 text-white rounded font-bold text-[11px]">Tolak</button>
+                                  </div>
+                                )}
                               </div>
-                              <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 font-semibold rounded text-[10px] border border-emerald-200">
-                                {eq.status}
-                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Inventaris Alat */}
+                      <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-6 space-y-4">
+                        <div className="flex items-center gap-2">
+                          <Package className="w-5 h-5 text-purple-600" />
+                          <h3 className="font-bold text-slate-900 text-sm">Inventaris Barang Lab</h3>
+                        </div>
+                        <form onSubmit={handleAddEquipment} className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2 text-xs">
+                          <input type="text" required value={newEqName} onChange={(e) => setNewEqName(e.target.value)} placeholder="Nama Alat" className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded" />
+                          <input type="text" value={newEqDesc} onChange={(e) => setNewEqDesc(e.target.value)} placeholder="Deskripsi Alat" className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded" />
+                          <button type="submit" disabled={actionLoading} className="w-full py-1.5 bg-purple-600 text-white rounded font-bold">Tambah Alat</button>
+                        </form>
+                        <div className="divide-y divide-slate-100 max-h-48 overflow-y-auto">
+                          {equipments.map((eq) => (
+                            <div key={eq.id} className="py-2 flex justify-between text-xs">
+                              <span className="font-medium text-slate-900">{eq.name}</span>
+                              <span className="text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded text-[10px] font-bold">{eq.status}</span>
                             </div>
                           ))}
                         </div>
-                      )}
+                      </div>
                     </div>
                   </div>
-
-                </div>
+                )}
               </div>
             )}
 
-          </div>
+            {/* TAMPILAN PEMINJAM (USER) */}
+            {user?.role === 'user' && (
+              <div className="space-y-8">
+                {!membership && (
+                  <div className="max-w-xl mx-auto bg-white border border-slate-200 rounded-2xl p-8 shadow-sm">
+                    <h2 className="text-xl font-bold text-slate-900 mb-1 text-center">Gabung ke Organisasi / Lab</h2>
+                    <p className="text-xs text-slate-500 mb-6 text-center">Masukkan Kode Redeem dari Admin dan lengkapi biodata verifikasi 2-lapis Anda.</p>
+                    <form onSubmit={handleJoinOrg} className="space-y-3 text-xs">
+                      <input type="text" required value={redeemCode} onChange={(e) => setRedeemCode(e.target.value.toUpperCase())} placeholder="KODE REDEEM" className="w-full px-4 py-2 border rounded-xl font-mono uppercase font-bold text-center text-sm" />
+                      <input type="text" required value={fullname} onChange={(e) => setFullname(e.target.value)} placeholder="Nama Lengkap" className="w-full px-4 py-2 border rounded-xl" />
+                      <input type="text" required value={identityNumber} onChange={(e) => setIdentityNumber(e.target.value)} placeholder="NIM / NIK" className="w-full px-4 py-2 border rounded-xl" />
+                      <input type="tel" required value={phoneNumber} onChange={(e) => setPhoneNumber(e.target.value)} placeholder="No WhatsApp" className="w-full px-4 py-2 border rounded-xl" />
+                      <textarea rows={2} required value={joinReason} onChange={(e) => setJoinReason(e.target.value)} placeholder="Alasan Keperluan Bergabung..." className="w-full px-4 py-2 border rounded-xl" />
+                      <button type="submit" disabled={actionLoading} className="w-full py-2.5 bg-emerald-600 text-white rounded-xl font-bold">Kirim Permohonan</button>
+                    </form>
+                  </div>
+                )}
+
+                {membership && membership.status === 'PENDING' && (
+                  <div className="max-w-xl mx-auto bg-amber-50 border border-amber-200 rounded-2xl p-8 text-center text-amber-900">
+                    <Clock className="w-12 h-12 mx-auto text-amber-600 mb-3 animate-pulse" />
+                    <h2 className="text-xl font-bold mb-1">Menunggu Persetujuan Admin Lab</h2>
+                    <p className="text-xs text-amber-700">Pengajuan Anda ke {membership.organization?.name} sedang diverifikasi.</p>
+                  </div>
+                )}
+
+                {membership && membership.status === 'APPROVED' && (
+                  <div className="space-y-8">
+                    <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
+                      <h3 className="font-bold text-slate-900 text-sm mb-4">Pengajuan Peminjaman Alat Terenkripsi</h3>
+                      <form onSubmit={handleCreateLoan} className="space-y-3 text-xs">
+                        <select required value={selectedEqId} onChange={(e) => setSelectedEqId(e.target.value)} className="w-full px-4 py-2 border rounded-xl">
+                          <option value="">-- Pilih Barang --</option>
+                          {equipments.map(eq => <option key={eq.id} value={eq.id}>{eq.name} ({eq.status})</option>)}
+                        </select>
+                        <textarea rows={2} required value={loanPurpose} onChange={(e) => setLoanPurpose(e.target.value)} placeholder="Keperluan peminjaman..." className="w-full px-4 py-2 border rounded-xl" />
+                        <div className="grid grid-cols-2 gap-3">
+                          <select value={cryptoAlgo} onChange={(e) => setCryptoAlgo(e.target.value)} className="px-3 py-2 border rounded-xl font-bold text-emerald-700">
+                            <option value="AES">AES-256-GCM (Modern AEAD)</option>
+                            <option value="DES">DES-CBC (Legacy 56-bit)</option>
+                            <option value="RC4">RC4 (Stream Cipher)</option>
+                          </select>
+                          <input type="file" required onChange={(e) => setDocFile(e.target.files?.[0] || null)} className="text-slate-500" />
+                        </div>
+                        <button type="submit" disabled={actionLoading} className="w-full py-2.5 bg-emerald-600 text-white font-bold rounded-xl">Enkripsi & Ajukan Peminjaman</button>
+                      </form>
+                    </div>
+
+                    {/* Riwayat Loans */}
+                    <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+                      <div className="px-6 py-3 border-b text-xs font-bold text-slate-700">Riwayat Peminjaman Anda</div>
+                      <table className="w-full text-left text-xs">
+                        <thead className="bg-slate-50 text-slate-500">
+                          <tr><th className="py-2.5 px-6">Barang</th><th className="py-2.5 px-6">Algoritma</th><th className="py-2.5 px-6">Status</th></tr>
+                        </thead>
+                        <tbody className="divide-y">
+                          {myLoans.map(l => (
+                            <tr key={l.id} className="hover:bg-slate-50">
+                              <td className="py-2.5 px-6 font-semibold">{l.equipment?.name}</td>
+                              <td className="py-2.5 px-6 font-bold text-emerald-700">{l.crypto_algorithm}</td>
+                              <td className="py-2.5 px-6"><span className="px-2 py-0.5 bg-amber-50 text-amber-800 rounded font-bold">{l.status}</span></td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </>
         )}
 
         {/* ======================================================== */}
-        {/* TAMPILAN 2: KHUSUS ROLE PEMINJAM (USER / MAHASISWA)     */}
+        {/* TAB 2: BRANKAS KRIPTOGRAFI & DIGITAL SIGNATURE (VAULT)  */}
         {/* ======================================================== */}
-        {user?.role === 'user' && (
+        {activeTab === 'vault' && (
           <div className="space-y-8">
             
-            {/* FASE 1: BELUM BERGABUNG DENGAN ORGANISASI */}
-            {!membership && (
-              <div className="max-w-xl mx-auto bg-white border border-slate-200 rounded-2xl p-8 shadow-sm">
-                <div className="text-center mb-6">
-                  <div className="p-3 bg-emerald-600/10 text-emerald-600 rounded-2xl inline-block mb-3">
-                    <Key className="w-8 h-8" />
-                  </div>
-                  <h2 className="text-xl font-bold text-slate-900">Gabung ke Organisasi / Lab</h2>
-                  <p className="text-xs text-slate-500 mt-1">
-                    Masukkan Kode Redeem dan lengkapi biodata verifikasi 2-lapis Anda untuk dapat meminjam alat.
-                  </p>
+            {/* Banner Modul Kriptografi & Key Management */}
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-8 text-white flex flex-col sm:flex-row justify-between items-start sm:items-center gap-6 shadow-xl">
+              <div>
+                <div className="inline-flex items-center gap-2 px-3 py-1 bg-emerald-500/10 text-emerald-400 rounded-full text-xs font-semibold mb-3 border border-emerald-500/20">
+                  <Fingerprint className="w-3.5 h-3.5" /> Asymmetric RSA-2048 & SHA-256 Signature
                 </div>
-
-                <form onSubmit={handleJoinOrg} className="space-y-4 text-xs">
-                  <div>
-                    <label className="block font-semibold uppercase text-slate-700 mb-1">Kode Redeem Organisasi</label>
-                    <input
-                      type="text"
-                      required
-                      value={redeemCode}
-                      onChange={(e) => setRedeemCode(e.target.value.toUpperCase())}
-                      placeholder="Contoh: 8 Karakter Kode dari Admin Lab"
-                      className="w-full px-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl font-mono uppercase font-bold text-sm tracking-widest text-emerald-700"
-                    />
-                  </div>
-                  <div>
-                    <label className="block font-semibold uppercase text-slate-700 mb-1">Nama Lengkap</label>
-                    <input
-                      type="text"
-                      required
-                      value={fullname}
-                      onChange={(e) => setFullname(e.target.value)}
-                      placeholder="Sesuai kartu identitas mahasiswa"
-                      className="w-full px-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl"
-                    />
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block font-semibold uppercase text-slate-700 mb-1">NIM / NIK</label>
-                      <input
-                        type="text"
-                        required
-                        value={identityNumber}
-                        onChange={(e) => setIdentityNumber(e.target.value)}
-                        placeholder="Contoh: 5025211..."
-                        className="w-full px-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl"
-                      />
-                    </div>
-                    <div>
-                      <label className="block font-semibold uppercase text-slate-700 mb-1">No WhatsApp / HP</label>
-                      <input
-                        type="tel"
-                        required
-                        value={phoneNumber}
-                        onChange={(e) => setPhoneNumber(e.target.value)}
-                        placeholder="08123456789"
-                        className="w-full px-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl"
-                      />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block font-semibold uppercase text-slate-700 mb-1">Alasan Bergabung / Keperluan Umum</label>
-                    <textarea
-                      rows={2}
-                      required
-                      value={joinReason}
-                      onChange={(e) => setJoinReason(e.target.value)}
-                      placeholder="Untuk praktikum Alpro semester ini..."
-                      className="w-full px-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl"
-                    />
-                  </div>
-                  <button
-                    type="submit"
-                    disabled={actionLoading}
-                    className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-xl text-sm transition-all shadow-md shadow-emerald-600/20"
-                  >
-                    {actionLoading ? 'Mengirim Data...' : 'Kirim Biodata & Ajukan Verifikasi'}
-                  </button>
-                </form>
-              </div>
-            )}
-
-            {/* FASE 2: SUDAH DAFTAR TAPI MASIH STATUS PENDING */}
-            {membership && membership.status === 'PENDING' && (
-              <div className="max-w-xl mx-auto bg-amber-50 border border-amber-200 rounded-2xl p-8 text-center text-amber-900 shadow-sm">
-                <Clock className="w-12 h-12 mx-auto text-amber-600 mb-3 animate-pulse" />
-                <h2 className="text-xl font-bold mb-2">Menunggu Persetujuan Admin Lab</h2>
-                <p className="text-xs text-amber-700 leading-relaxed mb-4">
-                  Anda telah mengajukan bergabung ke organisasi <span className="font-bold">{membership.organization?.name}</span>. 
-                  Admin sedang memverifikasi biodata dan identitas Anda. Harap tunggu hingga akun Anda disetujui untuk membuka peminjaman alat.
+                <h2 className="text-2xl font-bold tracking-tight">Brankas Kriptografi Pribadi</h2>
+                <p className="text-xs text-slate-400 mt-1 max-w-xl">
+                  Amankan berkas privat dengan enkripsi AES-256, bubuhkan tanda tangan digital (Digital Signature), dan bagikan secara aman menggunakan pertukaran kunci RSA-OAEP.
                 </p>
-                <div className="inline-block px-4 py-1.5 bg-amber-200/60 rounded-full text-xs font-bold text-amber-800">
-                  Status: PENDING VERIFICATION
-                </div>
               </div>
-            )}
 
-            {/* FASE 3: SUDAH APPROVED -> BISA MEMINJAM BARANG & FILE TERENKRIPSI */}
-            {membership && membership.status === 'APPROVED' && (
-              <div className="space-y-8">
-                {/* Banner Status Anggota */}
-                <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                  <div>
-                    <span className="text-[10px] uppercase tracking-wider font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
-                      Anggota Terverifikasi
-                    </span>
-                    <h2 className="text-xl font-bold text-slate-900 mt-1">{membership.organization?.name}</h2>
-                    <p className="text-xs text-slate-500">Peminjam: {membership.fullname} ({membership.identity_number})</p>
-                  </div>
-                  <span className="px-3 py-1 bg-emerald-600 text-white text-xs font-semibold rounded-xl flex items-center gap-1.5">
-                    <CheckCircle className="w-4 h-4" /> Akses Peminjaman Aktif
-                  </span>
+              <div className="text-center sm:text-right">
+                <button
+                  onClick={handleGenerateRSA}
+                  disabled={actionLoading}
+                  className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-xl text-xs transition-all shadow-lg shadow-emerald-600/30 flex items-center gap-2"
+                >
+                  <Key className="w-4 h-4" /> Generate Pasangan Kunci RSA
+                </button>
+                <span className="text-[10px] text-slate-400 block mt-1.5">Kunci 2048-bit otomatis tersimpan aman</span>
+              </div>
+            </div>
+
+            {/* Form Upload ke Brankas Pribadi */}
+            <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
+              <h3 className="font-bold text-slate-900 text-sm mb-2 flex items-center gap-2">
+                <Lock className="w-4 h-4 text-emerald-600" /> Simpan Dokumen Baru ke Brankas Pribadi
+              </h3>
+              <p className="text-xs text-slate-500 mb-4">
+                Dokumen akan dienkripsi dengan kunci AES-256 unik dan dihitung nilai integritas SHA-256-nya.
+              </p>
+              <form onSubmit={handleUploadVault} className="flex flex-col sm:flex-row gap-3">
+                <input
+                  type="file"
+                  required
+                  onChange={(e) => setVaultUploadFile(e.target.files?.[0] || null)}
+                  className="flex-1 text-xs text-slate-500 file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:bg-emerald-50 file:text-emerald-700 file:font-semibold"
+                />
+                <button
+                  type="submit"
+                  disabled={actionLoading}
+                  className="px-6 py-2.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl transition-all shadow-md"
+                >
+                  {actionLoading ? 'Mengenkripsi...' : 'Enkripsi & Simpan ke Brankas'}
+                </button>
+              </form>
+            </div>
+
+            {/* Tabel Berkas Brankas & Tanda Tangan Digital */}
+            <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+              <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center">
+                <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
+                  <FileText className="w-4 h-4 text-emerald-600" /> Daftar Berkas Brankas & Status Tanda Tangan
+                </h3>
+                <span className="text-xs bg-slate-100 px-3 py-1 rounded-full font-semibold text-slate-600">
+                  {vaultFiles.length} Berkas Tersimpan
+                </span>
+              </div>
+
+              {vaultFiles.length === 0 ? (
+                <div className="p-12 text-center text-slate-400 text-xs">
+                  <FolderLock className="w-10 h-10 mx-auto text-slate-300 mb-2" />
+                  Belum ada berkas di brankas digital Anda.
                 </div>
-
-                {/* Form Peminjaman Alat & Kriptografi */}
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                  <div className="lg:col-span-2 bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
-                    <h3 className="font-bold text-slate-900 text-base mb-4 flex items-center gap-2">
-                      <Lock className="w-5 h-5 text-emerald-600" /> Form Pengajuan Peminjaman Alat Terenkripsi
-                    </h3>
-
-                    {equipments.length === 0 ? (
-                      <p className="text-xs text-slate-400 py-6 text-center">Organisasi ini belum memiliki barang yang siap dipinjam.</p>
-                    ) : (
-                      <form onSubmit={handleCreateLoan} className="space-y-4 text-xs">
-                        <div>
-                          <label className="block font-semibold uppercase text-slate-700 mb-1">Pilih Alat / Fasilitas</label>
-                          <select
-                            required
-                            value={selectedEqId}
-                            onChange={(e) => setSelectedEqId(e.target.value)}
-                            className="w-full px-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 font-medium"
-                          >
-                            <option value="">-- Pilih Barang --</option>
-                            {equipments.map((eq) => (
-                              <option key={eq.id} value={eq.id}>
-                                {eq.name} ({eq.status})
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-
-                        <div>
-                          <label className="block font-semibold uppercase text-slate-700 mb-1">Keperluan Peminjaman</label>
-                          <textarea
-                            rows={2}
-                            required
-                            value={loanPurpose}
-                            onChange={(e) => setLoanPurpose(e.target.value)}
-                            placeholder="Jelaskan tujuan pemakaian alat dan durasinya..."
-                            className="w-full px-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl"
-                          />
-                        </div>
-
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                          <div>
-                            <label className="block font-semibold uppercase text-slate-700 mb-1">Algoritma Enkripsi Berkas</label>
-                            <select
-                              value={cryptoAlgo}
-                              onChange={(e) => setCryptoAlgo(e.target.value)}
-                              className="w-full px-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl font-bold text-emerald-700"
-                            >
-                              <option value="AES">AES-256-GCM (Modern AEAD)</option>
-                              <option value="DES">DES-CBC (Legacy 56-bit)</option>
-                              <option value="RC4">RC4 (Stream Cipher)</option>
-                            </select>
-                          </div>
-                          <div>
-                            <label className="block font-semibold uppercase text-slate-700 mb-1">Berkas Syarat (KTM/Surat)</label>
-                            <input
-                              type="file"
-                              required
-                              onChange={(e) => setDocFile(e.target.files?.[0] || null)}
-                              className="w-full text-slate-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-xl file:border-0 file:bg-emerald-50 file:text-emerald-700 file:font-semibold"
-                            />
-                          </div>
-                        </div>
-
-                        <button
-                          type="submit"
-                          disabled={actionLoading}
-                          className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-xl text-sm transition-all shadow-md shadow-emerald-600/20"
-                        >
-                          {actionLoading ? 'Mengenkripsi & Mengunggah...' : 'Enkripsi & Ajukan Peminjaman'}
-                        </button>
-                      </form>
-                    )}
-                  </div>
-
-                  {/* Ringkasan Edukasi Kriptografi */}
-                  <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm text-xs space-y-3">
-                    <h4 className="font-bold text-slate-900 text-sm">Standar Kriptografi PMO</h4>
-                    <p className="text-slate-500 leading-relaxed">
-                      Seluruh berkas persyaratan yang Anda unggah otomatis dienkripsi sebelum disimpan di server fisik.
-                    </p>
-                    <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl">
-                      <span className="font-bold text-emerald-700 block">AES-256-GCM</span>
-                      <p className="text-slate-500 mt-0.5">Enkripsi terautentikasi (AEAD) anti manipulasi file.</p>
-                    </div>
-                    <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl">
-                      <span className="font-bold text-amber-700 block">DES-CBC</span>
-                      <p className="text-slate-500 mt-0.5">Block cipher klasik kelipatan 8 byte dengan padding PKCS#7.</p>
-                    </div>
-                    <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl">
-                      <span className="font-bold text-blue-700 block">RC4 Stream</span>
-                      <p className="text-slate-500 mt-0.5">Stream cipher berbasis operasi XOR langsung pada byte data.</p>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Tabel Riwayat Peminjaman User */}
-                <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
-                  <div className="px-6 py-4 border-b border-slate-200 font-bold text-sm text-slate-900">
-                    Riwayat Peminjaman Anda
-                  </div>
-                  {myLoans.length === 0 ? (
-                    <p className="text-xs text-slate-400 py-8 text-center">Belum ada riwayat peminjaman alat.</p>
-                  ) : (
-                    <table className="w-full text-left text-xs">
-                      <thead className="bg-slate-50 text-slate-500 uppercase tracking-wider font-semibold border-b border-slate-200">
-                        <tr>
-                          <th className="py-3 px-6">Barang</th>
-                          <th className="py-3 px-6">Keperluan</th>
-                          <th className="py-3 px-6">Algoritma</th>
-                          <th className="py-3 px-6">Status</th>
-                          <th className="py-3 px-6 text-right">Aksi</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {myLoans.map((loan) => (
-                          <tr key={loan.id} className="hover:bg-slate-50">
-                            <td className="py-3 px-6 font-semibold">{loan.equipment?.name || '-'}</td>
-                            <td className="py-3 px-6 text-slate-600">{loan.purpose}</td>
-                            <td className="py-3 px-6 font-bold text-emerald-700">{loan.crypto_algorithm}</td>
-                            <td className="py-3 px-6">
-                              <span className="px-2 py-0.5 bg-amber-50 text-amber-700 font-bold rounded-full border border-amber-200">
-                                {loan.status}
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-50 text-slate-500 uppercase tracking-wider font-semibold border-b border-slate-200">
+                      <tr>
+                        <th className="py-3.5 px-6">Nama File</th>
+                        <th className="py-3.5 px-6">Enkripsi</th>
+                        <th className="py-3.5 px-6">Hash Integritas (SHA-256)</th>
+                        <th className="py-3.5 px-6">Tanda Tangan Digital</th>
+                        <th className="py-3.5 px-6 text-right">Aksi Kriptografi</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {vaultFiles.map((file) => (
+                        <tr key={file.id} className="hover:bg-slate-50 transition-colors">
+                          <td className="py-3.5 px-6 font-semibold text-slate-900">{file.filename}</td>
+                          <td className="py-3.5 px-6">
+                            <span className="px-2.5 py-0.5 bg-emerald-100 text-emerald-800 font-bold rounded text-[10px]">
+                              {file.crypto_algorithm}-256-GCM
+                            </span>
+                          </td>
+                          <td className="py-3.5 px-6 font-mono text-[11px] text-slate-500">
+                            <span title={file.file_hash} className="cursor-help">
+                              {file.file_hash.substring(0, 16)}...
+                            </span>
+                          </td>
+                          <td className="py-3.5 px-6">
+                            {file.is_signed ? (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold rounded-full text-[10px]">
+                                <CheckCircle className="w-3 h-3" /> Signed (RSA)
                               </span>
-                            </td>
-                            <td className="py-3 px-6 text-right">
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-slate-100 text-slate-500 rounded-full text-[10px] font-medium">
+                                Belum Ditandatangani
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-3.5 px-6 text-right space-x-2">
+                            {!file.is_signed ? (
                               <button
-                                onClick={() => handleDownloadFile(loan.id, loan.original_filename)}
-                                className="inline-flex items-center gap-1 px-3 py-1 bg-slate-100 hover:bg-emerald-50 text-slate-700 hover:text-emerald-700 rounded-lg font-semibold border border-slate-200 transition-colors"
+                                onClick={() => handleSignFile(file.id)}
+                                className="px-3 py-1.5 bg-purple-50 hover:bg-purple-100 text-purple-700 font-bold rounded-lg border border-purple-200 transition-colors"
                               >
-                                <Download className="w-3.5 h-3.5" /> Dekripsi
+                                Tandatangani (Sign)
                               </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  )}
+                            ) : (
+                              <button
+                                onClick={() => handleVerifyFile(file.id)}
+                                className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold rounded-lg border border-emerald-200 transition-colors"
+                              >
+                                Verifikasi Keaslian
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
-
-              </div>
-            )}
+              )}
+            </div>
 
           </div>
         )}
