@@ -31,3 +31,16 @@ Thumbs.db
 # Go Test & Coverage
 *.out
 *.test
+
+# dependencies
+/node_modules
+/.pnp
+.pnp.js
+
+# production
+/.next/
+/out/
+
+# env files
+.env*.local
+.env
