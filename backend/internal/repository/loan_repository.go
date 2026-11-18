@@ -55,7 +55,7 @@ func (r *LoanRepository) GetLoanByID(id uint) (*model.Loan, error) {
 
 func (r *LoanRepository) GetLoanByTransactionCode(code string) (*model.Loan, error) {
 	var loan model.Loan
-	err := r.db.Preload("User").Preload("Equipment").Preload("Organization").Where("transaction_code = ?", code).First(&loan, code).Error
+	err := r.db.Preload("User").Preload("Equipment").Preload("Organization").Where("transaction_code = ?", code).First(&loan).Error
 	if err != nil {
 		return nil, err
 	}
@@ -84,8 +84,11 @@ func (r *LoanRepository) ApproveAndAllocateStock(loanID uint) error {
 			return errors.New("gagal menyetujui: stok barang saat ini sudah tidak mencukupi")
 		}
 
-		// Kurangi stok tersedia
+		// Kurangi stok tersedia dan sinkronkan status alat
 		eq.AvailableQuantity -= loan.Quantity
+		if eq.AvailableQuantity == 0 {
+			eq.Status = "BORROWED"
+		}
 		if err := tx.Save(&eq).Error; err != nil {
 			return err
 		}
@@ -142,6 +145,9 @@ func (r *LoanRepository) ConfirmReturn(loanID uint, condition, notes string) err
 			eq.AvailableQuantity += loan.Quantity
 			if eq.AvailableQuantity > eq.TotalQuantity {
 				eq.AvailableQuantity = eq.TotalQuantity
+			}
+			if eq.AvailableQuantity > 0 {
+				eq.Status = "AVAILABLE"
 			}
 			return tx.Save(&eq).Error
 		}
