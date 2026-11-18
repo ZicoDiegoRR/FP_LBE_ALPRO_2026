@@ -84,6 +84,16 @@ func (h *LoanHandler) CreateLoan(c *gin.Context) {
 		return
 	}
 
+	equipment, err := h.orgRepo.GetEquipmentByID(uint(equipmentID))
+	if err != nil || equipment == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Barang tidak ditemukan"})
+		return
+	}
+	if equipment.OrganizationID != membership.OrganizationID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Akses ditolak: barang bukan milik organisasi Anda"})
+		return
+	}
+
 	qtyStr := c.DefaultPostForm("quantity", "1")
 	quantity, _ := strconv.Atoi(qtyStr)
 	if quantity < 1 {
@@ -94,13 +104,29 @@ func (h *LoanHandler) CreateLoan(c *gin.Context) {
 	startDateStr := c.PostForm("start_date")
 	dueDateStr := c.PostForm("due_date")
 
-	startDate, err := time.Parse("2006-01-02", startDateStr)
-	if err != nil {
-		startDate = time.Now()
+	startDate := time.Now()
+	if startDateStr != "" {
+		parsedStart, err := time.Parse("2006-01-02", startDateStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Format start_date harus YYYY-MM-DD"})
+			return
+		}
+		startDate = parsedStart
 	}
-	dueDate, err := time.Parse("2006-01-02", dueDateStr)
-	if err != nil {
-		dueDate = startDate.AddDate(0, 0, 3) // Default 3 hari
+
+	dueDate := startDate.AddDate(0, 0, 3) // Default 3 hari
+	if dueDateStr != "" {
+		parsedDue, err := time.Parse("2006-01-02", dueDateStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Format due_date harus YYYY-MM-DD"})
+			return
+		}
+		dueDate = parsedDue
+	}
+
+	if !dueDate.After(startDate) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Tanggal pengembalian (due_date) harus setelah tanggal mulai (start_date)"})
+		return
 	}
 
 	// Cek kebijakan dokumen organisasi
@@ -115,32 +141,48 @@ func (h *LoanHandler) CreateLoan(c *gin.Context) {
 		return
 	}
 
-	// Jika ada file yang dilampirkan, lakukan enkripsi Zero-Plaintext
-	if fileHeader != nil {
+	// Jika ada file yang dilampirkan, lakukan enkripsi Zero-Plaintext tanpa mengabaikan error
+	if err == nil && fileHeader != nil {
 		file, err := fileHeader.Open()
-		if err == nil {
-			defer file.Close()
-			fileBytes, _ := io.ReadAll(file)
-
-			// Hitung hash
-			hBytes := sha256.Sum256(fileBytes)
-			fileHash = hex.EncodeToString(hBytes[:])
-
-			key, err := h.getKeyByAlgorithm(algorithm)
-			if err == nil {
-				encryptedData, err := h.cryptoService.Encrypt(fileBytes, algorithm, key)
-				if err == nil {
-					timestamp := time.Now().UnixNano()
-					safeFilename := fmt.Sprintf("loan_%d_%s.enc", timestamp, filepath.Base(fileHeader.Filename))
-					destinationPath := filepath.Join(h.cfg.StoragePath, safeFilename)
-
-					if os.WriteFile(destinationPath, encryptedData, 0600) == nil {
-						origFilename = fileHeader.Filename
-						encPath = destinationPath
-					}
-				}
-			}
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Gagal membuka file dokumen"})
+			return
 		}
+		defer file.Close()
+
+		fileBytes, err := io.ReadAll(file)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal membaca isi file dokumen"})
+			return
+		}
+
+		// Hitung hash SHA-256
+		hBytes := sha256.Sum256(fileBytes)
+		fileHash = hex.EncodeToString(hBytes[:])
+
+		key, err := h.getKeyByAlgorithm(algorithm)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		encryptedData, err := h.cryptoService.Encrypt(fileBytes, algorithm, key)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mengenkripsi dokumen: " + err.Error()})
+			return
+		}
+
+		timestamp := time.Now().UnixNano()
+		safeFilename := fmt.Sprintf("loan_%d_%s.enc", timestamp, filepath.Base(fileHeader.Filename))
+		destinationPath := filepath.Join(h.cfg.StoragePath, safeFilename)
+
+		if err := os.WriteFile(destinationPath, encryptedData, 0600); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal menyimpan dokumen terenkripsi"})
+			return
+		}
+
+		origFilename = filepath.Base(fileHeader.Filename)
+		encPath = destinationPath
 	}
 
 	loan := model.Loan{
@@ -319,7 +361,7 @@ func (h *LoanHandler) DownloadDecryptedFile(c *gin.Context) {
 		return
 	}
 
-	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s", loan.OriginalFilename))
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filepath.Base(loan.OriginalFilename)))
 	c.Header("Content-Type", "application/octet-stream")
 	c.Data(http.StatusOK, "application/octet-stream", decryptedPlaintext)
 }
