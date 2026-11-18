@@ -1,6 +1,7 @@
 package crypto
 
 import (
+	"encoding/base64"
 	"errors"
 	"strings"
 )
@@ -39,4 +40,26 @@ func (s *CryptoService) Decrypt(data []byte, algorithm string, key []byte) ([]by
 	default:
 		return nil, errors.New("algoritma tidak didukung: gunakan AES, DES, atau RC4")
 	}
+}
+
+// EncryptString mengenkripsi string plaintext dan mengembalikan hasil terenkripsi dalam format Base64
+func (s *CryptoService) EncryptString(plaintext string, algorithm string, key []byte) (string, error) {
+	cipherBytes, err := s.Encrypt([]byte(plaintext), algorithm, key)
+	if err != nil {
+		return "", err
+	}
+	return base64.StdEncoding.EncodeToString(cipherBytes), nil
+}
+
+// DecryptString mendekripsi string Base64 hasil EncryptString menjadi plaintext asli
+func (s *CryptoService) DecryptString(ciphertextBase64 string, algorithm string, key []byte) (string, error) {
+	cipherBytes, err := base64.StdEncoding.DecodeString(ciphertextBase64)
+	if err != nil {
+		return "", errors.New("format ciphertext Base64 tidak valid")
+	}
+	plainBytes, err := s.Decrypt(cipherBytes, algorithm, key)
+	if err != nil {
+		return "", err
+	}
+	return string(plainBytes), nil
 }

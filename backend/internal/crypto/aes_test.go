@@ -2,6 +2,9 @@ package crypto
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -102,5 +105,68 @@ func TestAESNonDeterministicAndTampering(t *testing.T) {
 	}
 	if _, err := DecryptAES(enc1[:5], key); err == nil {
 		t.Fatal("ciphertext terpotong seharusnya ditolak")
+	}
+}
+
+func TestAESFileRoundTripSHA256(t *testing.T) {
+	key := []byte("kunci-rahasia-pmo-harus-32-byte!")
+	tmpDir := t.TempDir()
+
+	srcPath := filepath.Join(tmpDir, "sample_input.bin")
+	encPath := filepath.Join(tmpDir, "sample_input.bin.enc")
+	decPath := filepath.Join(tmpDir, "sample_decrypted.bin")
+
+	original := append([]byte("PMO-AES-FILE-TEST\n"), bytes.Repeat([]byte{0x00, 0x7f, 0xff, 0x41}, 1024)...)
+	if err := os.WriteFile(srcPath, original, 0600); err != nil {
+		t.Fatalf("gagal menulis file sumber: %v", err)
+	}
+
+	srcBytes, err := os.ReadFile(srcPath)
+	if err != nil {
+		t.Fatalf("gagal membaca file sumber: %v", err)
+	}
+	srcHash := sha256.Sum256(srcBytes)
+
+	encBytes, err := EncryptAES(srcBytes, key)
+	if err != nil {
+		t.Fatalf("EncryptAES file gagal: %v", err)
+	}
+	if err := os.WriteFile(encPath, encBytes, 0600); err != nil {
+		t.Fatalf("gagal menulis file terenkripsi: %v", err)
+	}
+
+	readEnc, err := os.ReadFile(encPath)
+	if err != nil {
+		t.Fatalf("gagal membaca file terenkripsi: %v", err)
+	}
+	decBytes, err := DecryptAES(readEnc, key)
+	if err != nil {
+		t.Fatalf("DecryptAES file gagal: %v", err)
+	}
+	if err := os.WriteFile(decPath, decBytes, 0600); err != nil {
+		t.Fatalf("gagal menulis file dekripsi: %v", err)
+	}
+
+	decHash := sha256.Sum256(decBytes)
+	if srcHash != decHash {
+		t.Fatalf("SHA-256 tidak cocok! src=%x dec=%x", srcHash, decHash)
+	}
+}
+
+func TestCryptoServiceStringRoundTrip(t *testing.T) {
+	svc := NewCryptoService()
+	key := []byte("kunci-rahasia-pmo-harus-32-byte!")
+	plain := "Budi Santoso | NIM: 5025231001"
+
+	enc, err := svc.EncryptString(plain, "AES", key)
+	if err != nil {
+		t.Fatalf("EncryptString gagal: %v", err)
+	}
+	dec, err := svc.DecryptString(enc, "AES", key)
+	if err != nil {
+		t.Fatalf("DecryptString gagal: %v", err)
+	}
+	if dec != plain {
+		t.Fatalf("DecryptString tidak cocok: dapat %q, harap %q", dec, plain)
 	}
 }
