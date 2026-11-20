@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"crypto/cipher"
 	"crypto/des"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"errors"
 	"io"
 )
@@ -64,8 +66,14 @@ func EncryptDES(plaintext []byte, key []byte) ([]byte, error) {
 	mode := cipher.NewCBCEncrypter(block, iv)
 	mode.CryptBlocks(ciphertext[des.BlockSize:], paddedPlaintext)
 
-	// Format hasil: [IV 8 byte][CIPHERTEXT...]
-	return ciphertext, nil
+	// Format hasil: [IV][ciphertext CBC][HMAC-SHA256].
+	mac := hmac.New(sha256.New, key)
+	mac.Write(ciphertext)
+
+	authenticatedCiphertext := make([]byte, len(ciphertext)+sha256.Size)
+	copy(authenticatedCiphertext, ciphertext)
+	copy(authenticatedCiphertext[len(ciphertext):], mac.Sum(nil))
+	return authenticatedCiphertext, nil
 }
 
 // DecryptDES mendekripsi data DES mode CBC
@@ -74,8 +82,20 @@ func DecryptDES(ciphertext []byte, key []byte) ([]byte, error) {
 		return nil, errors.New("kunci DES harus berukuran tepat 8 byte (64 bit)")
 	}
 
-	if len(ciphertext) < des.BlockSize {
-		return nil, errors.New("ukuran ciphertext terlalu pendek (tidak memiliki IV)")
+	if len(ciphertext) < des.BlockSize*2+sha256.Size {
+		return nil, errors.New("ukuran ciphertext terlalu pendek atau tidak memiliki blok data dan MAC")
+	}
+
+	authenticatedData := ciphertext[:len(ciphertext)-sha256.Size]
+	actualCiphertext := authenticatedData[des.BlockSize:]
+	if len(actualCiphertext)%des.BlockSize != 0 {
+		return nil, errors.New("panjang ciphertext bukan kelipatan ukuran blok DES")
+	}
+
+	mac := hmac.New(sha256.New, key)
+	mac.Write(authenticatedData)
+	if !hmac.Equal(ciphertext[len(authenticatedData):], mac.Sum(nil)) {
+		return nil, errors.New("integritas ciphertext DES tidak valid")
 	}
 
 	block, err := des.NewCipher(key)
@@ -83,16 +103,8 @@ func DecryptDES(ciphertext []byte, key []byte) ([]byte, error) {
 		return nil, err
 	}
 
-	// Ambil IV dari 8 byte pertama
-	iv := ciphertext[:des.BlockSize]
-	actualCiphertext := ciphertext[des.BlockSize:]
-
-	if len(actualCiphertext)%des.BlockSize != 0 {
-		return nil, errors.New("panjang ciphertext bukan kelipatan ukuran blok DES")
-	}
-
 	// Lakukan dekripsi CBC
-	mode := cipher.NewCBCDecrypter(block, iv)
+	mode := cipher.NewCBCDecrypter(block, authenticatedData[:des.BlockSize])
 	decrypted := make([]byte, len(actualCiphertext))
 	mode.CryptBlocks(decrypted, actualCiphertext)
 
