@@ -21,6 +21,8 @@ dist/
 uploads/
 storage/
 temp/
+logs/
+*.log
 
 # IDE & OS Specific
 .vscode/

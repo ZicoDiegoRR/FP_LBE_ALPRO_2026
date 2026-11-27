@@ -35,7 +35,7 @@ func main() {
 
 	// 5. Inisialisasi Handler Layer
 	authHandler := handler.NewAuthHandler(userRepo, cfg)
-	orgHandler := handler.NewOrgHandler(orgRepo)
+	orgHandler := handler.NewOrgHandler(orgRepo, cryptoService, cfg)
 	loanHandler := handler.NewLoanHandler(loanRepo, orgRepo, cryptoService, cfg)
 	vaultHandler := handler.NewVaultHandler(vaultRepo, cryptoService, cfg)
 

@@ -31,7 +31,7 @@ type OrganizationMember struct {
 	Organization      Organization `gorm:"foreignKey:OrganizationID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE;" json:"organization,omitempty"`
 	
 	// Biodata Fleksibel (Data Minimization)
-	Fullname          string       `gorm:"not null;size:100" json:"fullname"`
+	Fullname          string       `gorm:"not null;type:text" json:"fullname"`
 	CustomBiodataJSON string       `gorm:"type:text" json:"custom_biodata_json"` // Jawaban form dinamis anggota dalam format JSON
 	
 	// Status Verifikasi oleh Admin

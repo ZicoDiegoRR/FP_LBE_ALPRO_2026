@@ -8,16 +8,51 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"pmo-backend/internal/config"
+	"pmo-backend/internal/crypto"
 	"pmo-backend/internal/model"
 	"pmo-backend/internal/repository"
 )
 
 type OrgHandler struct {
-	orgRepo *repository.OrgRepository
+	orgRepo       *repository.OrgRepository
+	cryptoService *crypto.CryptoService
+	cfg           *config.Config
 }
 
-func NewOrgHandler(orgRepo *repository.OrgRepository) *OrgHandler {
-	return &OrgHandler{orgRepo: orgRepo}
+func NewOrgHandler(orgRepo *repository.OrgRepository, cryptoService *crypto.CryptoService, cfg *config.Config) *OrgHandler {
+	return &OrgHandler{
+		orgRepo:       orgRepo,
+		cryptoService: cryptoService,
+		cfg:           cfg,
+	}
+}
+
+func (h *OrgHandler) encryptField(plaintext string) (string, error) {
+	if plaintext == "" || h.cryptoService == nil || h.cfg == nil {
+		return plaintext, nil
+	}
+	return h.cryptoService.EncryptString(plaintext, "AES", []byte(strings.TrimSpace(h.cfg.CryptoKeyAES)))
+}
+
+func (h *OrgHandler) decryptField(stored string) string {
+	if stored == "" || h.cryptoService == nil || h.cfg == nil {
+		return stored
+	}
+	plain, err := h.cryptoService.DecryptString(stored, "AES", []byte(strings.TrimSpace(h.cfg.CryptoKeyAES)))
+	if err != nil {
+		// Fallback untuk data plaintext lama di database
+		return stored
+	}
+	return plain
+}
+
+func (h *OrgHandler) decryptMember(member *model.OrganizationMember) {
+	if member == nil {
+		return
+	}
+	member.Fullname = h.decryptField(member.Fullname)
+	member.CustomBiodataJSON = h.decryptField(member.CustomBiodataJSON)
 }
 
 func generateRedeemCode() string {
@@ -139,11 +174,22 @@ func (h *OrgHandler) JoinOrganization(c *gin.Context) {
 		return
 	}
 
+	encFullname, err := h.encryptField(input.Fullname)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mengenkripsi nama lengkap"})
+		return
+	}
+	encBiodata, err := h.encryptField(input.CustomBiodataJSON)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mengenkripsi biodata anggota"})
+		return
+	}
+
 	membership := model.OrganizationMember{
 		UserID:            userID,
 		OrganizationID:    org.ID,
-		Fullname:          input.Fullname,
-		CustomBiodataJSON: input.CustomBiodataJSON,
+		Fullname:          encFullname,
+		CustomBiodataJSON: encBiodata,
 		Status:            "PENDING",
 	}
 
@@ -166,6 +212,7 @@ func (h *OrgHandler) GetMyMembership(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal memeriksa keanggotaan"})
 		return
 	}
+	h.decryptMember(member)
 	c.JSON(http.StatusOK, gin.H{"membership": member})
 }
 
@@ -182,6 +229,10 @@ func (h *OrgHandler) GetPendingMembers(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mengambil daftar anggota"})
 		return
+	}
+
+	for i := range members {
+		h.decryptMember(&members[i])
 	}
 
 	c.JSON(http.StatusOK, gin.H{"members": members})

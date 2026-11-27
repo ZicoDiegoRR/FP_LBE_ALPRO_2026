@@ -4,9 +4,12 @@ import (
 	"encoding/base64"
 	"errors"
 	"strings"
+	"time"
+
+	"pmo-backend/internal/utils"
 )
 
-// CryptoService adalah interface penyedia layanan enkripsi dan dekripsi
+// CryptoService adalah penyedia layanan enkripsi dan dekripsi beserta audit logging
 type CryptoService struct{}
 
 // NewCryptoService membuat instance baru CryptoService
@@ -16,30 +19,50 @@ func NewCryptoService() *CryptoService {
 
 // Encrypt mendistribusikan proses enkripsi ke algoritma yang dipilih
 func (s *CryptoService) Encrypt(data []byte, algorithm string, key []byte) ([]byte, error) {
-	switch strings.ToUpper(algorithm) {
+	algo := strings.ToUpper(strings.TrimSpace(algorithm))
+	start := time.Now()
+
+	var (
+		out []byte
+		err error
+	)
+	switch algo {
 	case "AES":
-		return EncryptAES(data, key)
+		out, err = EncryptAES(data, key)
 	case "DES":
-		return EncryptDES(data, key)
+		out, err = EncryptDES(data, key)
 	case "RC4":
-		return EncryptRC4(data, key)
+		out, err = EncryptRC4(data, key)
 	default:
-		return nil, errors.New("algoritma tidak didukung: gunakan AES, DES, atau RC4")
+		err = errors.New("algoritma tidak didukung: gunakan AES, DES, atau RC4")
 	}
+
+	utils.LogCryptoOperation("ENCRYPT", algo, len(data), time.Since(start), err)
+	return out, err
 }
 
 // Decrypt mendistribusikan proses dekripsi ke algoritma yang dipilih
 func (s *CryptoService) Decrypt(data []byte, algorithm string, key []byte) ([]byte, error) {
-	switch strings.ToUpper(algorithm) {
+	algo := strings.ToUpper(strings.TrimSpace(algorithm))
+	start := time.Now()
+
+	var (
+		out []byte
+		err error
+	)
+	switch algo {
 	case "AES":
-		return DecryptAES(data, key)
+		out, err = DecryptAES(data, key)
 	case "DES":
-		return DecryptDES(data, key)
+		out, err = DecryptDES(data, key)
 	case "RC4":
-		return DecryptRC4(data, key)
+		out, err = DecryptRC4(data, key)
 	default:
-		return nil, errors.New("algoritma tidak didukung: gunakan AES, DES, atau RC4")
+		err = errors.New("algoritma tidak didukung: gunakan AES, DES, atau RC4")
 	}
+
+	utils.LogCryptoOperation("DECRYPT", algo, len(data), time.Since(start), err)
+	return out, err
 }
 
 // EncryptString mengenkripsi string plaintext dan mengembalikan hasil terenkripsi dalam format Base64

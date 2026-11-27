@@ -59,6 +59,34 @@ func (h *LoanHandler) getKeyByAlgorithm(algo string) ([]byte, error) {
 	}
 }
 
+func (h *LoanHandler) encryptField(plaintext string) (string, error) {
+	if plaintext == "" {
+		return "", nil
+	}
+	return h.cryptoService.EncryptString(plaintext, "AES", []byte(strings.TrimSpace(h.cfg.CryptoKeyAES)))
+}
+
+func (h *LoanHandler) decryptField(stored string) string {
+	if stored == "" {
+		return ""
+	}
+	plain, err := h.cryptoService.DecryptString(stored, "AES", []byte(strings.TrimSpace(h.cfg.CryptoKeyAES)))
+	if err != nil {
+		// Fallback untuk data plaintext lama di database
+		return stored
+	}
+	return plain
+}
+
+func (h *LoanHandler) decryptLoanFields(loan *model.Loan) {
+	if loan == nil {
+		return
+	}
+	loan.Purpose = h.decryptField(loan.Purpose)
+	loan.RejectReason = h.decryptField(loan.RejectReason)
+	loan.ReturnNotes = h.decryptField(loan.ReturnNotes)
+}
+
 func generateTransactionCode() string {
 	b := make([]byte, 3)
 	rand.Read(b)
@@ -185,13 +213,22 @@ func (h *LoanHandler) CreateLoan(c *gin.Context) {
 		encPath = destinationPath
 	}
 
+	encPurpose, err := h.encryptField(purpose)
+	if err != nil {
+		if encPath != "" {
+			os.Remove(encPath)
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mengenkripsi keperluan peminjaman"})
+		return
+	}
+
 	loan := model.Loan{
 		TransactionCode:  generateTransactionCode(),
 		UserID:           userID,
 		OrganizationID:   membership.OrganizationID,
 		EquipmentID:      uint(equipmentID),
 		Quantity:         quantity,
-		Purpose:          purpose,
+		Purpose:          encPurpose,
 		Status:           model.LoanStatusPending,
 		StartDate:        startDate,
 		DueDate:          dueDate,
@@ -209,6 +246,8 @@ func (h *LoanHandler) CreateLoan(c *gin.Context) {
 		return
 	}
 
+	loan.Purpose = purpose
+
 	c.JSON(http.StatusCreated, gin.H{
 		"message": "Pengajuan peminjaman berhasil dikirim!",
 		"loan":    loan,
@@ -222,6 +261,9 @@ func (h *LoanHandler) GetUserLoans(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mengambil daftar peminjaman"})
 		return
+	}
+	for i := range loans {
+		h.decryptLoanFields(&loans[i])
 	}
 	c.JSON(http.StatusOK, gin.H{"loans": loans})
 }
@@ -239,6 +281,9 @@ func (h *LoanHandler) GetOrgLoans(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mengambil daftar peminjaman"})
 		return
+	}
+	for i := range loans {
+		h.decryptLoanFields(&loans[i])
 	}
 	c.JSON(http.StatusOK, gin.H{"loans": loans})
 }
@@ -269,7 +314,13 @@ func (h *LoanHandler) RejectLoan(c *gin.Context) {
 		return
 	}
 
-	if err := h.loanRepo.RejectLoan(uint(loanID), input.Reason); err != nil {
+	encReason, err := h.encryptField(input.Reason)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mengenkripsi alasan penolakan"})
+		return
+	}
+
+	if err := h.loanRepo.RejectLoan(uint(loanID), encReason); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal menolak pengajuan"})
 		return
 	}
@@ -305,7 +356,13 @@ func (h *LoanHandler) ConfirmReturn(c *gin.Context) {
 		return
 	}
 
-	if err := h.loanRepo.ConfirmReturn(uint(loanID), input.Condition, input.Notes); err != nil {
+	encNotes, err := h.encryptField(input.Notes)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mengenkripsi catatan pengembalian"})
+		return
+	}
+
+	if err := h.loanRepo.ConfirmReturn(uint(loanID), input.Condition, encNotes); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
