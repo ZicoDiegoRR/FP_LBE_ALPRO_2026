@@ -1,0 +1,12 @@
+PMO - Platform Peminjaman & Manajemen Inventaris Terenkripsi
+============================================================
+Dokumen sampel pengujian kriptografi (Assignment 1).
+
+Algoritma yang diuji:
+1. AES-256-GCM (Authenticated Encryption with Associated Data)
+2. DES-CBC + HMAC-SHA256 (Legacy Block Cipher dengan integritas)
+3. RC4 + Random Salt + HMAC-SHA256 (Stream Cipher dengan nonce/salt per-enkripsi)
+
+Data sampel ini digunakan untuk pengujian round-trip file (SHA-256) serta
+benchmark perbandingan performa enkripsi dan dekripsi (throughput, latensi,
+alokasi memori, dan overhead ukuran ciphertext).
