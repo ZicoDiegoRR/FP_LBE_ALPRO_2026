@@ -46,16 +46,20 @@ export default function RegisterPage() {
   return (
     <div className="min-h-screen grid grid-cols-1 lg:grid-cols-2 bg-slate-50">
       
-      {/* BAGIAN KIRI: Foto / Desain Statis */}
-      <div className="hidden lg:flex relative bg-blue-700 items-center justify-center overflow-hidden">
-        {/* Ganti src di bawah ini dengan path foto desain statis Anda di folder public */}
-        <img
-          src="/images/register-banner.png"
-          alt="Desain Sistem PMO"
-          className="w-full h-full object-cover object-center"
-        />
-        {/* Overlay halus agar menyatu dengan estetika antarmuka */}
-        <div className="absolute inset-0 bg-blue-950/10 pointer-events-none" />
+      {/* BAGIAN KIRI: Panel Branding Registrasi */}
+      <div className="hidden lg:flex relative bg-gradient-to-br from-blue-800 via-blue-700 to-indigo-900 items-center justify-center overflow-hidden p-12 text-white">
+        <div className="relative z-10 max-w-md space-y-6">
+          <div className="inline-flex items-center gap-2 px-3 py-1 bg-white/10 rounded-full text-xs font-semibold border border-white/20">
+            <ShieldCheck className="w-3.5 h-3.5" /> Keamanan Berbasis Kriptografi
+          </div>
+          <h1 className="text-4xl font-bold tracking-tight leading-tight">
+            Daftar Akun Penyedia atau Peminjam
+          </h1>
+          <p className="text-sm text-blue-100 leading-relaxed">
+            Kelola inventaris organisasi dan transaksi peminjaman dengan audit enkripsi otomatis dan kebijakan kata sandi NIST SP 800-63B.
+          </p>
+        </div>
+        <div className="absolute inset-0 bg-blue-950/20 pointer-events-none" />
       </div>
 
       {/* BAGIAN KANAN: Menu & Form Pendaftaran */}

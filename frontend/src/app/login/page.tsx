@@ -45,16 +45,20 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen grid grid-cols-1 lg:grid-cols-2 bg-slate-50">
       
-      {/* BAGIAN KIRI: Foto / Desain Statis */}
-      <div className="hidden lg:flex relative bg-emerald-700 items-center justify-center overflow-hidden">
-        {/* Ganti src di bawah ini dengan path foto desain statis Anda di folder public */}
-        <img
-          src="/images/login-banner.png"
-          alt="Desain Sistem PMO"
-          className="w-full h-full object-cover object-center"
-        />
-        {/* Overlay halus agar menyatu dengan estetika antarmuka */}
-        <div className="absolute inset-0 bg-emerald-950/10 pointer-events-none" />
+      {/* BAGIAN KIRI: Panel Branding Kriptografi */}
+      <div className="hidden lg:flex relative bg-gradient-to-br from-emerald-800 via-emerald-700 to-teal-900 items-center justify-center overflow-hidden p-12 text-white">
+        <div className="relative z-10 max-w-md space-y-6">
+          <div className="inline-flex items-center gap-2 px-3 py-1 bg-white/10 rounded-full text-xs font-semibold border border-white/20">
+            <Lock className="w-3.5 h-3.5" /> Zero-Plaintext Encryption
+          </div>
+          <h1 className="text-4xl font-bold tracking-tight leading-tight">
+            Platform Peminjaman &amp; Manajemen Inventaris Terenkripsi
+          </h1>
+          <p className="text-sm text-emerald-100 leading-relaxed">
+            Dokumen persyaratan dan biodata sensitif diamankan dengan AES-256-GCM, DES-CBC + HMAC, serta RC4 + Salt &amp; HMAC.
+          </p>
+        </div>
+        <div className="absolute inset-0 bg-emerald-950/20 pointer-events-none" />
       </div>
 
       {/* BAGIAN KANAN: Menu & Form Login */}

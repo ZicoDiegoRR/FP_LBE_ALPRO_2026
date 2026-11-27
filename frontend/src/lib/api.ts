@@ -59,3 +59,47 @@ export async function apiRequest<T>(
 
   return data as T;
 }
+
+// Helper untuk mengunduh berkas terproteksi JWT (dekripsi on-the-fly dari backend)
+export async function downloadProtectedFile(
+  endpoint: string,
+  fallbackFilename = 'document'
+): Promise<void> {
+  const token = getStoredToken();
+  const headers = new Headers();
+  if (token) {
+    headers.set('Authorization', `Bearer ${token}`);
+  }
+
+  const response = await fetch(`${API_URL}${endpoint}`, {
+    method: 'GET',
+    headers,
+  });
+
+  if (response.status === 401) {
+    clearStoredToken();
+    if (typeof window !== 'undefined' && !window.location.pathname.includes('/login')) {
+      window.location.href = '/login';
+    }
+    throw new Error('Sesi berakhir, silakan login kembali');
+  }
+
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data.error || 'Gagal mengunduh dokumen');
+  }
+
+  const disposition = response.headers.get('Content-Disposition') || '';
+  const match = disposition.match(/filename="?([^"]+)"?/i);
+  const filename = match?.[1] || fallbackFilename;
+
+  const blob = await response.blob();
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  window.URL.revokeObjectURL(url);
+}

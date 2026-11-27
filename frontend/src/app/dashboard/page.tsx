@@ -22,7 +22,18 @@ import {
   Share2,
   FolderLock
 } from 'lucide-react';
-import { apiRequest, clearStoredToken, getStoredToken } from '@/lib/api';
+import { apiRequest, clearStoredToken, downloadProtectedFile, getStoredToken } from '@/lib/api';
+
+const formatDateInput = (date: Date) => date.toISOString().split('T')[0];
+
+const parseCustomBiodata = (raw?: string): { no_identitas?: string; no_hp?: string; alasan?: string } => {
+  if (!raw) return {};
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return {};
+  }
+};
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -36,9 +47,13 @@ export default function DashboardPage() {
   const [myOrg, setMyOrg] = useState<any>(null);
   const [pendingMembers, setPendingMembers] = useState<any[]>([]);
   const [equipments, setEquipments] = useState<any[]>([]);
+  const [orgLoans, setOrgLoans] = useState<any[]>([]);
   const [newOrgName, setNewOrgName] = useState('');
   const [newOrgDesc, setNewOrgDesc] = useState('');
+  const [newEqCode, setNewEqCode] = useState('');
   const [newEqName, setNewEqName] = useState('');
+  const [newEqCategory, setNewEqCategory] = useState('Umum');
+  const [newEqQuantity, setNewEqQuantity] = useState(1);
   const [newEqDesc, setNewEqDesc] = useState('');
 
   // State Khusus PEMINJAM (USER)
@@ -51,6 +66,13 @@ export default function DashboardPage() {
 
   // State Peminjaman Alat
   const [selectedEqId, setSelectedEqId] = useState('');
+  const [loanQuantity, setLoanQuantity] = useState(1);
+  const [loanStartDate, setLoanStartDate] = useState(() => formatDateInput(new Date()));
+  const [loanDueDate, setLoanDueDate] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 3);
+    return formatDateInput(d);
+  });
   const [loanPurpose, setLoanPurpose] = useState('');
   const [cryptoAlgo, setCryptoAlgo] = useState('AES');
   const [docFile, setDocFile] = useState<File | null>(null);
@@ -88,12 +110,14 @@ export default function DashboardPage() {
         const orgRes: any = await apiRequest('/admin/org');
         if (orgRes.organization) {
           setMyOrg(orgRes.organization);
-          const [membersRes, eqRes]: [any, any] = await Promise.all([
+          const [membersRes, eqRes, loansRes]: [any, any, any] = await Promise.all([
             apiRequest('/admin/org/members'),
             apiRequest('/equipments'),
+            apiRequest('/admin/org/loans'),
           ]);
           setPendingMembers(membersRes.members || []);
           setEquipments(eqRes.equipments || []);
+          setOrgLoans(loansRes.loans || []);
         }
       } else {
         const memberRes: any = await apiRequest('/orgs/my-membership');
@@ -168,16 +192,106 @@ export default function DashboardPage() {
     try {
       await apiRequest('/admin/org/equipments', {
         method: 'POST',
-        body: JSON.stringify({ name: newEqName, description: newEqDesc }),
+        body: JSON.stringify({
+          code: newEqCode.trim().toUpperCase(),
+          name: newEqName,
+          category: newEqCategory || 'Umum',
+          description: newEqDesc,
+          quantity: Number(newEqQuantity) || 1,
+        }),
       });
       setMsg({ type: 'success', text: 'Barang berhasil ditambahkan ke inventaris!' });
+      setNewEqCode('');
       setNewEqName('');
+      setNewEqCategory('Umum');
+      setNewEqQuantity(1);
       setNewEqDesc('');
       loadDashboardData();
     } catch (err: any) {
       setMsg({ type: 'error', text: err.message });
     } finally {
       setActionLoading(false);
+    }
+  };
+
+  const handleApproveLoan = async (loanId: number) => {
+    setActionLoading(true);
+    setMsg(null);
+    try {
+      await apiRequest(`/admin/org/loans/${loanId}/approve`, { method: 'PATCH' });
+      setMsg({ type: 'success', text: 'Peminjaman berhasil disetujui dan stok diperbarui!' });
+      loadDashboardData();
+    } catch (err: any) {
+      setMsg({ type: 'error', text: err.message });
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleRejectLoan = async (loanId: number) => {
+    const reason = window.prompt('Masukkan alasan penolakan peminjaman:');
+    if (!reason || !reason.trim()) return;
+    setActionLoading(true);
+    setMsg(null);
+    try {
+      await apiRequest(`/admin/org/loans/${loanId}/reject`, {
+        method: 'PATCH',
+        body: JSON.stringify({ reason: reason.trim() }),
+      });
+      setMsg({ type: 'success', text: 'Pengajuan peminjaman ditolak.' });
+      loadDashboardData();
+    } catch (err: any) {
+      setMsg({ type: 'error', text: err.message });
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleConfirmReturn = async (loanId: number) => {
+    const condInput = window.prompt('Masukkan kondisi barang (BAIK / RUSAK / HILANG):', 'BAIK');
+    if (!condInput) return;
+    const condition = condInput.trim().toUpperCase();
+    if (!['BAIK', 'RUSAK', 'HILANG'].includes(condition)) {
+      setMsg({ type: 'error', text: 'Kondisi barang harus BAIK, RUSAK, atau HILANG.' });
+      return;
+    }
+    const notes = window.prompt('Catatan pengembalian (opsional):', '') || '';
+    setActionLoading(true);
+    setMsg(null);
+    try {
+      await apiRequest(`/admin/org/loans/${loanId}/return-confirm`, {
+        method: 'POST',
+        body: JSON.stringify({ condition, notes }),
+      });
+      setMsg({ type: 'success', text: 'Pengembalian berhasil dikonfirmasi!' });
+      loadDashboardData();
+    } catch (err: any) {
+      setMsg({ type: 'error', text: err.message });
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleRequestReturn = async (loanId: number) => {
+    setActionLoading(true);
+    setMsg(null);
+    try {
+      await apiRequest(`/loans/${loanId}/return-request`, { method: 'POST' });
+      setMsg({ type: 'success', text: 'Permintaan pengembalian dikirim! Menunggu konfirmasi Admin.' });
+      loadDashboardData();
+    } catch (err: any) {
+      setMsg({ type: 'error', text: err.message });
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleDownloadLoanDoc = async (loanId: number, filename?: string) => {
+    setMsg(null);
+    try {
+      await downloadProtectedFile(`/loans/${loanId}/download`, filename || `loan_${loanId}`);
+    } catch (err: any) {
+      setMsg({ type: 'error', text: err.message });
     }
   };
 
@@ -192,9 +306,11 @@ export default function DashboardPage() {
         body: JSON.stringify({
           redeem_code: redeemCode,
           fullname,
-          identity_number: identityNumber,
-          phone_number: phoneNumber,
-          reason: joinReason,
+          custom_biodata_json: JSON.stringify({
+            no_identitas: identityNumber,
+            no_hp: phoneNumber,
+            alasan: joinReason,
+          }),
         }),
       });
       setMsg({ type: 'success', text: 'Pengajuan bergabung berhasil! Menunggu persetujuan Admin.' });
@@ -217,12 +333,16 @@ export default function DashboardPage() {
     try {
       const formData = new FormData();
       formData.append('equipment_id', selectedEqId);
+      formData.append('quantity', String(loanQuantity));
+      formData.append('start_date', loanStartDate);
+      formData.append('due_date', loanDueDate);
       formData.append('purpose', loanPurpose);
       formData.append('crypto_algorithm', cryptoAlgo);
       formData.append('document', docFile);
 
       await apiRequest('/loans', { method: 'POST', body: formData });
       setMsg({ type: 'success', text: `Pengajuan berhasil! Dokumen diamankan dengan algoritma ${cryptoAlgo}.` });
+      setLoanQuantity(1);
       setLoanPurpose('');
       setDocFile(null);
       loadDashboardData();
@@ -453,24 +573,31 @@ export default function DashboardPage() {
                           <p className="text-xs text-slate-400 py-8 text-center">Belum ada pengajuan anggota.</p>
                         ) : (
                           <div className="space-y-3 max-h-80 overflow-y-auto">
-                            {pendingMembers.map((m) => (
-                              <div key={m.id} className="p-3.5 border border-slate-200 rounded-xl bg-slate-50 text-xs">
-                                <div className="flex justify-between items-start mb-1">
-                                  <span className="font-bold text-slate-900">{m.fullname}</span>
-                                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                                    m.status === 'APPROVED' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
-                                  }`}>{m.status}</span>
-                                </div>
-                                <p className="text-slate-500">NIM: {m.identity_number} | HP: {m.phone_number}</p>
-                                <p className="text-slate-600 italic mt-1">&ldquo;{m.reason}&rdquo;</p>
-                                {m.status === 'PENDING' && (
-                                  <div className="flex gap-2 mt-2 pt-2 border-t border-slate-200">
-                                    <button onClick={() => handleVerifyMember(m.id, 'APPROVED')} className="flex-1 py-1 bg-emerald-600 text-white rounded font-bold text-[11px]">Setujui</button>
-                                    <button onClick={() => handleVerifyMember(m.id, 'REJECTED')} className="flex-1 py-1 bg-red-600 text-white rounded font-bold text-[11px]">Tolak</button>
+                            {pendingMembers.map((m) => {
+                              const bio = parseCustomBiodata(m.custom_biodata_json);
+                              return (
+                                <div key={m.id} className="p-3.5 border border-slate-200 rounded-xl bg-slate-50 text-xs">
+                                  <div className="flex justify-between items-start mb-1">
+                                    <span className="font-bold text-slate-900">{m.fullname}</span>
+                                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                      m.status === 'APPROVED' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+                                    }`}>{m.status}</span>
                                   </div>
-                                )}
-                              </div>
-                            ))}
+                                  <p className="text-slate-500">
+                                    NIM/NIK: {bio.no_identitas || '-'} | HP: {bio.no_hp || '-'}
+                                  </p>
+                                  {bio.alasan && (
+                                    <p className="text-slate-600 italic mt-1">&ldquo;{bio.alasan}&rdquo;</p>
+                                  )}
+                                  {m.status === 'PENDING' && (
+                                    <div className="flex gap-2 mt-2 pt-2 border-t border-slate-200">
+                                      <button onClick={() => handleVerifyMember(m.id, 'APPROVED')} className="flex-1 py-1 bg-emerald-600 text-white rounded font-bold text-[11px]">Setujui</button>
+                                      <button onClick={() => handleVerifyMember(m.id, 'REJECTED')} className="flex-1 py-1 bg-red-600 text-white rounded font-bold text-[11px]">Tolak</button>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
                           </div>
                         )}
                       </div>
@@ -482,19 +609,114 @@ export default function DashboardPage() {
                           <h3 className="font-bold text-slate-900 text-sm">Inventaris Barang Lab</h3>
                         </div>
                         <form onSubmit={handleAddEquipment} className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2 text-xs">
-                          <input type="text" required value={newEqName} onChange={(e) => setNewEqName(e.target.value)} placeholder="Nama Alat" className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded" />
+                          <div className="grid grid-cols-2 gap-2">
+                            <input type="text" required value={newEqCode} onChange={(e) => setNewEqCode(e.target.value)} placeholder="Kode Barang (cth: LAB-01)" className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded font-mono uppercase" />
+                            <input type="number" min={1} required value={newEqQuantity} onChange={(e) => setNewEqQuantity(Number(e.target.value))} placeholder="Kuantitas" className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded" />
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            <input type="text" required value={newEqName} onChange={(e) => setNewEqName(e.target.value)} placeholder="Nama Alat" className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded" />
+                            <input type="text" value={newEqCategory} onChange={(e) => setNewEqCategory(e.target.value)} placeholder="Kategori (cth: Elektronik)" className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded" />
+                          </div>
                           <input type="text" value={newEqDesc} onChange={(e) => setNewEqDesc(e.target.value)} placeholder="Deskripsi Alat" className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded" />
                           <button type="submit" disabled={actionLoading} className="w-full py-1.5 bg-purple-600 text-white rounded font-bold">Tambah Alat</button>
                         </form>
                         <div className="divide-y divide-slate-100 max-h-48 overflow-y-auto">
                           {equipments.map((eq) => (
-                            <div key={eq.id} className="py-2 flex justify-between text-xs">
-                              <span className="font-medium text-slate-900">{eq.name}</span>
+                            <div key={eq.id} className="py-2 flex justify-between items-center text-xs">
+                              <div>
+                                <span className="font-mono text-[10px] text-slate-400 mr-2">{eq.code}</span>
+                                <span className="font-medium text-slate-900">{eq.name}</span>
+                                <span className="text-slate-500 ml-2">({eq.available_quantity}/{eq.total_quantity})</span>
+                              </div>
                               <span className="text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded text-[10px] font-bold">{eq.status}</span>
                             </div>
                           ))}
                         </div>
                       </div>
+                    </div>
+
+                    {/* Manajemen Peminjaman Organisasi (Admin) */}
+                    <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+                      <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <FileCheck className="w-5 h-5 text-purple-600" />
+                          <h3 className="font-bold text-slate-900 text-sm">Daftar Peminjaman Masuk &amp; Aktif</h3>
+                        </div>
+                        <span className="text-xs bg-purple-50 text-purple-700 px-3 py-1 rounded-full font-bold">
+                          {orgLoans.length} Transaksi
+                        </span>
+                      </div>
+                      {orgLoans.length === 0 ? (
+                        <p className="text-xs text-slate-400 py-8 text-center">Belum ada transaksi peminjaman di organisasi ini.</p>
+                      ) : (
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-left text-xs">
+                            <thead className="bg-slate-50 text-slate-500 uppercase font-semibold border-b border-slate-200">
+                              <tr>
+                                <th className="py-3 px-4">Kode</th>
+                                <th className="py-3 px-4">Peminjam</th>
+                                <th className="py-3 px-4">Barang (Qty)</th>
+                                <th className="py-3 px-4">Keperluan</th>
+                                <th className="py-3 px-4">Algo</th>
+                                <th className="py-3 px-4">Status</th>
+                                <th className="py-3 px-4 text-right">Aksi</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                              {orgLoans.map((l) => (
+                                <tr key={l.id} className="hover:bg-slate-50">
+                                  <td className="py-3 px-4 font-mono text-[11px] text-slate-600">{l.transaction_code}</td>
+                                  <td className="py-3 px-4 font-semibold text-slate-900">{l.user?.username || `User #${l.user_id}`}</td>
+                                  <td className="py-3 px-4">{l.equipment?.name} <span className="text-slate-500">x{l.quantity}</span></td>
+                                  <td className="py-3 px-4 max-w-xs truncate" title={l.purpose}>{l.purpose || '-'}</td>
+                                  <td className="py-3 px-4 font-bold text-emerald-700">{l.crypto_algorithm}</td>
+                                  <td className="py-3 px-4">
+                                    <span className="px-2 py-0.5 bg-amber-50 text-amber-800 rounded font-bold text-[10px]">{l.status}</span>
+                                  </td>
+                                  <td className="py-3 px-4 text-right space-x-1.5 whitespace-nowrap">
+                                    {l.original_filename && (
+                                      <button
+                                        onClick={() => handleDownloadLoanDoc(l.id, l.original_filename)}
+                                        className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded font-bold text-[11px]"
+                                        title={`Unduh ${l.original_filename}`}
+                                      >
+                                        <Download className="w-3 h-3" /> Unduh
+                                      </button>
+                                    )}
+                                    {l.status === 'PENDING' && (
+                                      <>
+                                        <button
+                                          onClick={() => handleApproveLoan(l.id)}
+                                          disabled={actionLoading}
+                                          className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded font-bold text-[11px]"
+                                        >
+                                          Setujui
+                                        </button>
+                                        <button
+                                          onClick={() => handleRejectLoan(l.id)}
+                                          disabled={actionLoading}
+                                          className="px-2.5 py-1 bg-red-600 hover:bg-red-700 text-white rounded font-bold text-[11px]"
+                                        >
+                                          Tolak
+                                        </button>
+                                      </>
+                                    )}
+                                    {(l.status === 'BORROWED' || l.status === 'RETURN_REQUESTED') && (
+                                      <button
+                                        onClick={() => handleConfirmReturn(l.id)}
+                                        disabled={actionLoading}
+                                        className="px-2.5 py-1 bg-purple-600 hover:bg-purple-700 text-white rounded font-bold text-[11px]"
+                                      >
+                                        Konfirmasi Kembali
+                                      </button>
+                                    )}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}
@@ -532,10 +754,35 @@ export default function DashboardPage() {
                     <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
                       <h3 className="font-bold text-slate-900 text-sm mb-4">Pengajuan Peminjaman Alat Terenkripsi</h3>
                       <form onSubmit={handleCreateLoan} className="space-y-3 text-xs">
-                        <select required value={selectedEqId} onChange={(e) => setSelectedEqId(e.target.value)} className="w-full px-4 py-2 border rounded-xl">
-                          <option value="">-- Pilih Barang --</option>
-                          {equipments.map(eq => <option key={eq.id} value={eq.id}>{eq.name} ({eq.status})</option>)}
-                        </select>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                          <select required value={selectedEqId} onChange={(e) => setSelectedEqId(e.target.value)} className="sm:col-span-2 w-full px-4 py-2 border rounded-xl">
+                            <option value="">-- Pilih Barang --</option>
+                            {equipments.map(eq => (
+                              <option key={eq.id} value={eq.id}>
+                                {eq.code ? `[${eq.code}] ` : ''}{eq.name} (Stok: {eq.available_quantity}/{eq.total_quantity})
+                              </option>
+                            ))}
+                          </select>
+                          <input
+                            type="number"
+                            min={1}
+                            required
+                            value={loanQuantity}
+                            onChange={(e) => setLoanQuantity(Number(e.target.value))}
+                            placeholder="Jumlah"
+                            className="w-full px-4 py-2 border rounded-xl"
+                          />
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-[11px] font-semibold text-slate-600 mb-1">Tanggal Mulai</label>
+                            <input type="date" required value={loanStartDate} onChange={(e) => setLoanStartDate(e.target.value)} className="w-full px-3 py-2 border rounded-xl" />
+                          </div>
+                          <div>
+                            <label className="block text-[11px] font-semibold text-slate-600 mb-1">Tanggal Kembali</label>
+                            <input type="date" required value={loanDueDate} onChange={(e) => setLoanDueDate(e.target.value)} className="w-full px-3 py-2 border rounded-xl" />
+                          </div>
+                        </div>
                         <textarea rows={2} required value={loanPurpose} onChange={(e) => setLoanPurpose(e.target.value)} placeholder="Keperluan peminjaman..." className="w-full px-4 py-2 border rounded-xl" />
                         <div className="grid grid-cols-2 gap-3">
                           <select value={cryptoAlgo} onChange={(e) => setCryptoAlgo(e.target.value)} className="px-3 py-2 border rounded-xl font-bold text-emerald-700">
@@ -545,27 +792,61 @@ export default function DashboardPage() {
                           </select>
                           <input type="file" required onChange={(e) => setDocFile(e.target.files?.[0] || null)} className="text-slate-500" />
                         </div>
-                        <button type="submit" disabled={actionLoading} className="w-full py-2.5 bg-emerald-600 text-white font-bold rounded-xl">Enkripsi & Ajukan Peminjaman</button>
+                        <button type="submit" disabled={actionLoading} className="w-full py-2.5 bg-emerald-600 text-white font-bold rounded-xl">Enkripsi &amp; Ajukan Peminjaman</button>
                       </form>
                     </div>
 
                     {/* Riwayat Loans */}
                     <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
                       <div className="px-6 py-3 border-b text-xs font-bold text-slate-700">Riwayat Peminjaman Anda</div>
-                      <table className="w-full text-left text-xs">
-                        <thead className="bg-slate-50 text-slate-500">
-                          <tr><th className="py-2.5 px-6">Barang</th><th className="py-2.5 px-6">Algoritma</th><th className="py-2.5 px-6">Status</th></tr>
-                        </thead>
-                        <tbody className="divide-y">
-                          {myLoans.map(l => (
-                            <tr key={l.id} className="hover:bg-slate-50">
-                              <td className="py-2.5 px-6 font-semibold">{l.equipment?.name}</td>
-                              <td className="py-2.5 px-6 font-bold text-emerald-700">{l.crypto_algorithm}</td>
-                              <td className="py-2.5 px-6"><span className="px-2 py-0.5 bg-amber-50 text-amber-800 rounded font-bold">{l.status}</span></td>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left text-xs">
+                          <thead className="bg-slate-50 text-slate-500">
+                            <tr>
+                              <th className="py-2.5 px-4">Kode</th>
+                              <th className="py-2.5 px-4">Barang</th>
+                              <th className="py-2.5 px-4">Keperluan</th>
+                              <th className="py-2.5 px-4">Algoritma</th>
+                              <th className="py-2.5 px-4">Status</th>
+                              <th className="py-2.5 px-4 text-right">Aksi</th>
                             </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                          </thead>
+                          <tbody className="divide-y">
+                            {myLoans.map(l => (
+                              <tr key={l.id} className="hover:bg-slate-50">
+                                <td className="py-2.5 px-4 font-mono text-[11px] text-slate-600">{l.transaction_code}</td>
+                                <td className="py-2.5 px-4 font-semibold">{l.equipment?.name} <span className="text-slate-500">x{l.quantity}</span></td>
+                                <td className="py-2.5 px-4 max-w-xs truncate" title={l.purpose}>{l.purpose || '-'}</td>
+                                <td className="py-2.5 px-4 font-bold text-emerald-700">{l.crypto_algorithm}</td>
+                                <td className="py-2.5 px-4">
+                                  <span className="px-2 py-0.5 bg-amber-50 text-amber-800 rounded font-bold">{l.status}</span>
+                                  {l.reject_reason && <p className="text-[10px] text-red-600 mt-0.5">Alasan: {l.reject_reason}</p>}
+                                  {l.return_notes && <p className="text-[10px] text-slate-500 mt-0.5">Catatan: {l.return_notes}</p>}
+                                </td>
+                                <td className="py-2.5 px-4 text-right space-x-1.5 whitespace-nowrap">
+                                  {l.original_filename && (
+                                    <button
+                                      onClick={() => handleDownloadLoanDoc(l.id, l.original_filename)}
+                                      className="inline-flex items-center gap-1 px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded font-bold text-[11px]"
+                                    >
+                                      <Download className="w-3 h-3" /> Unduh
+                                    </button>
+                                  )}
+                                  {l.status === 'BORROWED' && (
+                                    <button
+                                      onClick={() => handleRequestReturn(l.id)}
+                                      disabled={actionLoading}
+                                      className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded font-bold text-[11px]"
+                                    >
+                                      Ajukan Kembali
+                                    </button>
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
                   </div>
                 )}
